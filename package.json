@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "package": "electron-packager . Mathsim --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=^/dist --ignore=^/tools --ignore=^/tests --ignore=^/\.git --ignore=^/node_modules --prune=false --app-copyright=\"Mathsim\"",
+    "package": "electron-packager . Mathsim --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=^/dist --ignore=^/tools --ignore=^/tests --ignore=^/[.]git --ignore=^/node_modules --prune=false --app-copyright=\"Mathsim\"",
     "test": "node tests/run.js"
   },
   "devDependencies": {
