@@ -84,6 +84,7 @@ const Shell = (() => {
     let first = null;
     try { first = localStorage.getItem(KEY); } catch { /* storage blocked */ }
     if (/^#f=/.test(location.hash)) first = 'fractals'; // a shared fractal link
+    if (/^#g=/.test(location.hash)) first = 'graph'; // a shared graph link
     open(mods.has(first) ? first : 'home');
   }
 

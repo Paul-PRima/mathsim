@@ -23,19 +23,72 @@
     } catch { /* fresh */ }
     loadExample(EXAMPLES[0], false);
   }
+  const FIELDS = ['text', 'color', 'hidden', 'min', 'max', 'step', 'tmin', 'tmax', 'showTable', 'tx0', 'tdx', 'ics'];
+  const snapshot = () => S.items.map((it) => Object.fromEntries(FIELDS.map((k) => [k, it[k]])));
+  const fromSnapshot = (list) => list.map((it) => Object.assign(newItem(''), it, { id: nextId++ }));
   const save = U.debounce(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({
-        items: S.items.map(({ text, color, hidden, min, max, step, tmin, tmax, showTable, tx0, tdx }) => ({ text, color, hidden, min, max, step, tmin, tmax, showTable, tx0, tdx })),
-        view: S.view,
-      }));
-    } catch { /* storage full */ }
+    try { localStorage.setItem(KEY, JSON.stringify({ items: snapshot(), view: S.view })); } catch { /* storage full */ }
   }, 300);
+
+  // ---------------------------------------------------------------- undo / redo (expression list)
+  const hist = { past: [], future: [], cur: null };
+  function record() {
+    const s = JSON.stringify(snapshot());
+    if (s === hist.cur) return;
+    if (hist.cur != null) { hist.past.push(hist.cur); if (hist.past.length > 100) hist.past.shift(); }
+    hist.cur = s;
+    hist.future = [];
+  }
+  const recordSoon = U.debounce(record, 450);
+  function restore(s) {
+    S.items = fromSnapshot(JSON.parse(s));
+    S.active = null;
+    S.pins = [];
+    refresh(true);
+  }
+  function undo() {
+    record(); // keep the latest edit
+    if (!hist.past.length) return U.toast('Nothing to undo');
+    hist.future.push(hist.cur);
+    hist.cur = hist.past.pop();
+    restore(hist.cur);
+  }
+  function redo() {
+    if (!hist.future.length) return U.toast('Nothing to redo');
+    hist.past.push(hist.cur);
+    hist.cur = hist.future.pop();
+    restore(hist.cur);
+  }
+
+  // ---------------------------------------------------------------- share links
+  const encode = () => btoa(unescape(encodeURIComponent(JSON.stringify({ items: snapshot(), view: S.view }))));
+  function shareLink() {
+    const desktop = /Electron/i.test(navigator.userAgent);
+    const text = desktop ? 'mathsim-graph:' + encode() : location.href.split('#')[0] + '#g=' + encode();
+    const fallback = () => U.ask('Copy this ' + (desktop ? 'share code' : 'link'), text);
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => U.toast((desktop ? 'Share code' : 'Link') + ' copied — open it with “Open shared…”'), fallback);
+    else fallback();
+  }
+  function openShared(text) {
+    const m = /(?:#g=|mathsim-graph:)([A-Za-z0-9+/=]+)/.exec(String(text || '').trim());
+    if (!m) { U.toast('That is not a graph link or share code'); return false; }
+    try {
+      const d = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+      if (!Array.isArray(d.items)) throw new Error();
+      record();
+      S.items = fromSnapshot(d.items);
+      if (d.view && d.view.s > 0) S.view = d.view;
+      S.active = null;
+      refresh(true);
+      viewChanged();
+      return true;
+    } catch { U.toast('That share code is damaged'); return false; }
+  }
 
   function newItem(text = '', extra = {}) {
     const used = new Set(S.items.map((i) => i.color));
     const color = COLORS.find((c) => !used.has(c)) || COLORS[S.items.length % COLORS.length];
-    return Object.assign({ id: nextId++, text, color, hidden: false, min: -10, max: 10, step: 0.1, tmin: 0, tmax: 2 * Math.PI, showTable: false, tx0: -2, tdx: 1 }, extra);
+    return Object.assign({ id: nextId++, text, color, hidden: false, min: -10, max: 10, step: 0.1, tmin: 0, tmax: 2 * Math.PI, showTable: false, tx0: -2, tdx: 1, ics: [] }, extra);
   }
 
   // ---------------------------------------------------------------- compiling the expression list
@@ -52,6 +105,11 @@
     for (const it of S.items) {
       it.kind = null; it.err = null; it.ast = null; it.fns = null; it.missing = []; it.value = null;
       if (!it.text.trim()) continue;
+      const ode = /^\s*(?:y'|y′|dy\s*\/\s*dx)\s*=\s*(.+)$/i.exec(it.text);
+      if (ode) {
+        try { it.ast = MX.parse(ode[1]); it.kind = 'ode'; } catch (e) { it.err = e.message; }
+        continue;
+      }
       try { it.ast = MX.parse(it.text); } catch (e) { it.err = e.message; continue; }
       const a = it.ast;
       if (a.t === 'cmp' && a.op === '=' && a.a.t === 'call' && a.a.args.length && a.a.args.every((x) => x.t === 'var') && !MX.FUNCS[a.a.f.toLowerCase()]) {
@@ -97,6 +155,9 @@
     for (const it of S.items) if (it.ast && !it.kind && !it.err) {
       try { classify(it); } catch (e) { it.err = e.message; it.kind = null; }
     }
+    for (const it of S.items) if (it.kind === 'ode' && !it.err) {
+      try { it.fns = { slope: comp(it.ast, ['x', 'y'], it) }; } catch (e) { it.err = e.message; }
+    }
   }
 
   function comp(ast, locals, it) {
@@ -133,6 +194,33 @@
         it.op = null;
         it.fns = { C: comp(a, ['x', 'y'], it) };
       }
+      return;
+    }
+    const fname = a.t === 'call' ? a.f.toLowerCase() : '';
+    if (fname === 'between') {
+      if (a.args.length !== 2 && a.args.length !== 4) throw new Error('between(f(x), g(x)) or between(f(x), g(x), a, b)');
+      const f = comp(a.args[0], ['x'], it), g = comp(a.args[1], ['x'], it);
+      let lo, hi;
+      if (a.args.length === 4) { lo = comp(a.args[2], [], it)(); hi = comp(a.args[3], [], it)(); }
+      else {
+        const r = MX.findRoots((x) => f(x) - g(x), -100, 100, 4000);
+        if (r.length < 2) throw new Error('The curves cross fewer than twice — give limits: between(f, g, a, b)');
+        lo = r[0]; hi = r[r.length - 1];
+      }
+      if (lo > hi) [lo, hi] = [hi, lo];
+      it.kind = 'area';
+      it.fns = { area: { f, g, lo, hi } };
+      it.value = MX.integral((x) => Math.abs(f(x) - g(x)), lo, hi);
+      it.areaText = `area between x = ${MX.fmt(+lo.toPrecision(8))} and ${MX.fmt(+hi.toPrecision(8))}: ${MX.fmt(+it.value.toPrecision(10))}`;
+      return;
+    }
+    if ((fname === 'int' || fname === 'integral') && a.args.length === 4 && a.args[1].t === 'var' && !uses(a.args[2], 'x') && !uses(a.args[3], 'x')) {
+      const f = comp(a.args[0], [a.args[1].name], it);
+      const lo = comp(a.args[2], [], it)(), hi = comp(a.args[3], [], it)();
+      it.kind = 'area';
+      it.fns = { area: { f, g: () => 0, lo: Math.min(lo, hi), hi: Math.max(lo, hi), curve: true } };
+      it.value = MX.integral(f, lo, hi);
+      it.areaText = `= ${MX.fmt(+it.value.toPrecision(10))} (signed area, shaded)`;
       return;
     }
     const ux = uses(a, 'x'), uy = uses(a, 'y');
@@ -303,6 +391,72 @@
     }
   }
 
+  // short line segments showing the slope y' = f(x, y) on a grid
+  function slopeField(f, color) {
+    const sp = 26, len = sp * 0.36;
+    ctx.strokeStyle = color + 'a0';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let py = sp / 2; py < H; py += sp) for (let px = sp / 2; px < W; px += sp) {
+      const m = f(fromPx(px), fromPy(py));
+      if (!isFinite(m)) continue;
+      const n = Math.hypot(1, m), dx = len / n, dy = (-m * len) / n;
+      ctx.moveTo(px - dx, py - dy);
+      ctx.lineTo(px + dx, py + dy);
+    }
+    ctx.stroke();
+  }
+  // the solution through (x0, y0), integrated with Runge–Kutta both ways across the view
+  function odeSolution(f, x0, y0, color) {
+    const h = S.view.s * 2, { x0: vx0, x1: vx1 } = range();
+    for (const dir of [1, -1]) {
+      let x = x0, y = y0;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(toPx(x), toPy(y));
+      for (let i = 0; i < 6000; i++) {
+        const s = dir * h;
+        const k1 = f(x, y), k2 = f(x + s / 2, y + (s / 2) * k1), k3 = f(x + s / 2, y + (s / 2) * k2), k4 = f(x + s, y + s * k3);
+        y += (s / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+        x += s;
+        if (!isFinite(y) || x < vx0 - h || x > vx1 + h || Math.abs(toPy(y)) > H * 20) break;
+        ctx.lineTo(toPx(x), toPy(y));
+      }
+      ctx.stroke();
+    }
+    dot(x0, y0, color, 4.5);
+  }
+  function shadeArea(A, color) {
+    const { x0, x1 } = range();
+    const lo = Math.max(A.lo, x0), hi = Math.min(A.hi, x1);
+    if (!(hi > lo)) return;
+    const n = Math.max(2, Math.ceil(toPx(hi) - toPx(lo)));
+    const top = [], bot = [];
+    for (let i = 0; i <= n; i++) {
+      const x = lo + ((hi - lo) * i) / n, a = A.f(x), b = A.g(x);
+      if (!isFinite(a) || !isFinite(b)) continue;
+      top.push([toPx(x), U.clamp(toPy(a), -1e5, 1e5)]);
+      bot.push([toPx(x), U.clamp(toPy(b), -1e5, 1e5)]);
+    }
+    if (top.length < 2) return;
+    ctx.fillStyle = color + '45';
+    ctx.beginPath();
+    top.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    // edges at the limits
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(top[0][0], top[0][1]); ctx.lineTo(bot[0][0], bot[0][1]);
+    ctx.moveTo(top[top.length - 1][0], top[top.length - 1][1]); ctx.lineTo(bot[bot.length - 1][0], bot[bot.length - 1][1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   function dot(x, y, color, r = 5, hollow = false) {
     ctx.beginPath();
     ctx.arc(toPx(x), toPy(y), r, 0, Math.PI * 2);
@@ -335,11 +489,25 @@
     if (!W || !H) return;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawScene();
+  }
+
+  // Everything on the graph, drawn through `ctx` (a canvas, or the SVG recorder for export).
+  function drawScene() {
     ctx.fillStyle = '#0c0e13';
     ctx.fillRect(0, 0, W, H);
     MX.M.af = 1;
     drawGrid();
     const vis = S.items.filter((it) => !it.hidden && it.fns && !it.err);
+    for (const it of vis) if (it.fns.area) {
+      shadeArea(it.fns.area, it.color);
+      plotFn(it.fns.area.f, it.color, false, 2);
+      if (!it.fns.area.curve) plotFn(it.fns.area.g, it.color, false, 2);
+    }
+    for (const it of vis) if (it.fns.slope) {
+      slopeField(it.fns.slope, it.color);
+      for (const [x0, y0] of it.ics || []) odeSolution(it.fns.slope, x0, y0, it.color);
+    }
     for (const it of vis) if (it.kind === 'region') {
       if (it.op) {
         const F = it.fns.F, op = it.op;
@@ -493,6 +661,12 @@
   }
 
   function click(p) {
+    const act = S.items.find((i) => i.id === S.active);
+    if (act && act.kind === 'ode' && !act.err && !S.hoverPoi) {
+      act.ics = [...(act.ics || []), [+fromPx(p.x).toPrecision(6), +fromPy(p.y).toPrecision(6)]];
+      refresh();
+      return;
+    }
     const q = S.hoverPoi;
     if (q) {
       const i = S.pins.indexOf(q);
@@ -520,6 +694,7 @@
     compileAll();
     if (rebuildList) renderList(); else S.items.forEach(updateInfo);
     save();
+    recordSoon();
     schedulePois();
     requestDraw();
   }
@@ -536,6 +711,8 @@
       case 'def': return `function ${it.defName}(${it.params.join(', ')})`;
       case 'var': return null;
       case 'value': return '= ' + MX.fmt(it.value);
+      case 'area': return it.areaText;
+      case 'ode': return 'slope field · select it, then click the graph to draw solution curves';
       default: return '';
     }
   }
@@ -556,6 +733,9 @@
           return inp;
         };
         kids.push(num('tmin'), el('span', {}, 'to'), num('tmax'));
+      }
+      if (it.kind === 'ode' && it.ics && it.ics.length) {
+        kids.push(U.el('button', { type: 'button', class: 'chip', onclick: () => { it.ics = []; refresh(); } }, `clear ${it.ics.length} solution${it.ics.length > 1 ? 's' : ''}`));
       }
       if (it.missing.length) {
         kids.push(el('span', {}, 'add slider:'), ...it.missing.map((n) => U.el('button', { type: 'button', class: 'chip', onclick: () => addSlider(n) }, n)));
@@ -699,6 +879,10 @@
     { name: 'Asymptotes', items: ['y = tan(x)', 'y = 1/(x - 1)', 'y = (x^2 - 1)/(x^2 - 4)'] },
     { name: 'Exponential and log', items: ['y = e^x', 'y = ln(x)', 'y = x'] },
     { name: 'Normal distribution', items: ['y = normpdf(x, m, s)', 'm = 0', 's = 1'], sliders: { s: [0.2, 4, 0.1] } },
+    { name: 'Differential equation (slope field)', items: ["y' = x - y"], ics: [[0, 1], [0, -3], [-4, 6], [2, -6]] },
+    { name: 'Logistic growth', items: ["y' = y(1 - y/8)"], ics: [[0, 0.5], [0, 12], [-6, 0.05]] },
+    { name: 'Area between curves', items: ['y = x^2', 'y = x + 2', 'between(x + 2, x^2)'] },
+    { name: 'Integral as area', items: ['y = sin(x)', 'int(sin(x), x, 0, pi)'] },
   ];
   function loadExample(ex, render = true) {
     S.items = [];
@@ -708,14 +892,60 @@
       const m = /^([A-Za-zͰ-Ͽ]+) =/u.exec(t);
       if (m && ex.sliders && ex.sliders[m[1]]) [it.min, it.max, it.step] = ex.sliders[m[1]];
       if (ex.t) [it.tmin, it.tmax] = ex.t;
+      if (ex.ics && /^\s*y'/.test(t)) it.ics = ex.ics.map((p) => p.slice());
     });
-    S.active = null;
+    S.active = ex.ics ? S.items[0].id : null; // a slope field example starts selected, ready for clicks
     S.pins = [];
     if (render) { S.view = { ...HOME }; refresh(true); }
   }
 
   function savePNG() {
     cv.toBlob((b) => { if (b) U.download(b, 'graph.png'); }, 'image/png');
+  }
+
+  // Records the 2D-canvas calls the graph uses and turns them into SVG elements.
+  class SvgCtx {
+    constructor(w, h, measure) {
+      this.w = w; this.h = h; this.out = []; this.d = ''; this.dash = [];
+      this.strokeStyle = '#000'; this.fillStyle = '#000'; this.lineWidth = 1; this.font = '12px sans-serif';
+      this.textAlign = 'left'; this.textBaseline = 'alphabetic'; this.lineJoin = 'miter';
+      this.measure = measure;
+    }
+    static n(v) { return Math.round(v * 100) / 100; }
+    static esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    setTransform() {} save() {} restore() {} clearRect() {}
+    setLineDash(d) { this.dash = d || []; }
+    beginPath() { this.d = ''; }
+    moveTo(x, y) { this.d += `M${SvgCtx.n(x)} ${SvgCtx.n(y)}`; }
+    lineTo(x, y) { this.d += `L${SvgCtx.n(x)} ${SvgCtx.n(y)}`; }
+    closePath() { this.d += 'Z'; }
+    rect(x, y, w, h) { this.d += `M${SvgCtx.n(x)} ${SvgCtx.n(y)}h${SvgCtx.n(w)}v${SvgCtx.n(h)}h${SvgCtx.n(-w)}Z`; }
+    roundRect(x, y, w, h) { this.rect(x, y, w, h); }
+    arc(x, y, r) { const n = SvgCtx.n; this.d += `M${n(x + r)} ${n(y)}A${n(r)} ${n(r)} 0 1 0 ${n(x - r)} ${n(y)}A${n(r)} ${n(r)} 0 1 0 ${n(x + r)} ${n(y)}Z`; }
+    stroke() {
+      if (!this.d) return;
+      const dash = this.dash.length ? ` stroke-dasharray="${this.dash.join(' ')}"` : '';
+      this.out.push(`<path d="${this.d}" fill="none" stroke="${this.strokeStyle}" stroke-width="${this.lineWidth}" stroke-linejoin="round" stroke-linecap="round"${dash}/>`);
+    }
+    fill() { if (this.d) this.out.push(`<path d="${this.d}" fill="${this.fillStyle}"/>`); }
+    fillRect(x, y, w, h) { const n = SvgCtx.n; this.out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" fill="${this.fillStyle}"/>`); }
+    strokeRect(x, y, w, h) { this.beginPath(); this.rect(x, y, w, h); this.stroke(); }
+    measureText(t) { return this.measure(this.font, t); }
+    fillText(t, x, y) {
+      const anchor = { left: 'start', start: 'start', center: 'middle', right: 'end', end: 'end' }[this.textAlign] || 'start';
+      const base = { top: 'hanging', middle: 'middle', bottom: 'text-after-edge' }[this.textBaseline] || 'auto';
+      const size = (/(\d+(?:\.\d+)?)px/.exec(this.font) || [0, 12])[1];
+      const family = /monospace/.test(this.font) ? 'ui-monospace, Consolas, monospace' : 'system-ui, sans-serif';
+      this.out.push(`<text x="${SvgCtx.n(x)}" y="${SvgCtx.n(y)}" fill="${this.fillStyle}" font-size="${size}" font-family="${family}" text-anchor="${anchor}" dominant-baseline="${base}">${SvgCtx.esc(t)}</text>`);
+    }
+    toString() { return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.w}" height="${this.h}" viewBox="0 0 ${this.w} ${this.h}">\n${this.out.join('\n')}\n</svg>\n`; }
+  }
+  function saveSVG() {
+    const real = ctx;
+    const svg = new SvgCtx(W, H, (font, t) => { real.font = font; return real.measureText(t); });
+    ctx = svg;
+    try { drawScene(); } finally { ctx = real; }
+    U.download(new Blob([svg.toString()], { type: 'image/svg+xml' }), 'graph.svg');
   }
 
   // ---------------------------------------------------------------- page
@@ -739,13 +969,20 @@
         el('li', {}, el('code', {}, 'a = 2'), ' — a slider; any other letter you use can become one'),
         el('li', {}, el('code', {}, 'f(x) = …'), ' — define a function to use elsewhere'),
         el('li', {}, el('code', {}, 'diff(f(x), x)'), ', ', el('code', {}, 'int(f(t), t, 0, x)'), ', ', el('code', {}, 'sum(…, k, 0, n)')),
+        el('li', {}, el('code', {}, "y' = x - y"), ' — slope field; select it and click the graph to draw solutions'),
+        el('li', {}, el('code', {}, 'between(x + 2, x^2)'), ' — shade and measure the area between two curves; ', el('code', {}, 'int(sin(x), x, 0, pi)'), ' — area under a curve'),
         el('li', {}, 'Click a curve, or its expression, to see roots, extrema and intersections. Click a marked point to pin its label.')));
     root.append(el('div', { class: 'gx' },
       el('aside', { class: 'gx-panel' },
         el('div', { class: 'gx-head' }, el('h2', {}, 'Graphing'), el('div', { class: 'btn-row' },
           U.el('button', { type: 'button', class: 'primary small', onclick: () => { const n = newItem(''); S.items.push(n); refresh(true); listEl.querySelector(`.gx-item[data-id="${n.id}"] .gx-input`).focus(); } }, '+ Expression'),
           examples,
-          U.el('button', { type: 'button', class: 'small', onclick: () => { if (window.confirm('Remove all expressions?')) { S.items = [newItem('')]; refresh(true); } } }, 'Clear'))),
+          U.el('button', { type: 'button', class: 'small', onclick: () => { if (window.confirm('Remove all expressions?')) { S.items = [newItem('')]; refresh(true); } } }, 'Clear')),
+          el('div', { class: 'btn-row' },
+            U.el('button', { type: 'button', class: 'small', title: 'Undo (Ctrl+Z)', onclick: undo }, '↶ Undo'),
+            U.el('button', { type: 'button', class: 'small', title: 'Redo (Ctrl+Y)', onclick: redo }, '↷ Redo'),
+            U.el('button', { type: 'button', class: 'small', title: 'Copy a link (or share code) for this graph', onclick: shareLink }, 'Share'),
+            U.el('button', { type: 'button', class: 'small', title: 'Open a graph someone shared', onclick: async () => { const t = await U.ask('Paste a graph link or share code', ''); if (t) openShared(t); } }, 'Open shared…'))),
         listEl,
         help),
       el('div', { class: 'gx-stage' },
@@ -754,11 +991,21 @@
           U.el('button', { type: 'button', title: 'Zoom in', onclick: () => zoomAt(W / 2, H / 2, 0.7) }, '+'),
           U.el('button', { type: 'button', title: 'Zoom out', onclick: () => zoomAt(W / 2, H / 2, 1 / 0.7) }, '−'),
           U.el('button', { type: 'button', title: 'Home view', onclick: () => { S.view = { ...HOME }; viewChanged(); } }, '⌂'),
-          U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓')),
+          U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓'),
+          U.el('button', { type: 'button', title: 'Save as SVG (vector)', class: 'gx-svg', onclick: saveSVG }, 'SVG')),
         coordEl)));
     bindCanvas();
     new ResizeObserver(() => { requestDraw(); schedulePois(); }).observe(cv);
     refresh(true);
+    if (/^#g=/.test(location.hash)) openShared(location.hash);
+    record();
+    window.addEventListener('keydown', (e) => {
+      if (!Shell.isActive('graph') || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (e.target.closest && e.target.closest('input, textarea')) return; // the text box keeps its own undo
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    });
   }
 
   Shell.register('graph', {

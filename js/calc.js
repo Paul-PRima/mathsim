@@ -2,8 +2,9 @@
 (() => {
   const { el } = U;
   const KEY = 'mathsim.calc.v1';
-  const st = { history: [], vars: { ans: 0 }, defs: {}, deg: false, second: false, hpos: -1 };
-  const scope = { vars: st.vars, funcs: {} };
+  const st = { history: [], vars: { ans: 0 }, cvars: {}, defs: {}, deg: false, second: false, hpos: -1 };
+  // exactVars: exact (BigInt) values of variables, so ans keeps all digits of 50!
+  const scope = { vars: st.vars, funcs: {}, exactVars: {} };
   let input, preview, histEl, varsEl, keysEl, modeBtn;
 
   function load() {
@@ -11,13 +12,14 @@
       const s = JSON.parse(localStorage.getItem(KEY));
       if (!s) return;
       st.history = Array.isArray(s.history) ? s.history.slice(-200) : [];
-      Object.assign(st.vars, s.vars || {});
+      for (const [k, v] of Object.entries(s.vars || {})) st.vars[k] = typeof v === 'number' ? v : NaN;
+      for (const [k, z] of Object.entries(s.cvars || {})) if (Array.isArray(z)) st.cvars[k] = z;
       st.defs = s.defs || {};
       st.deg = !!s.deg;
       for (const [name, d] of Object.entries(st.defs)) { try { defineFn(name, d.params, d.body); } catch { delete st.defs[name]; } }
     } catch { /* fresh start */ }
   }
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ history: st.history.slice(-200), vars: st.vars, defs: st.defs, deg: st.deg })); } catch { /* storage full */ } };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ history: st.history.slice(-200), vars: st.vars, cvars: st.cvars, defs: st.defs, deg: st.deg })); } catch { /* storage full */ } };
 
   const angles = () => { MX.M.af = st.deg ? Math.PI / 180 : 1; };
 
@@ -54,9 +56,10 @@
     if (ast.t === 'cmp' && ast.op === '=') {
       // a = 5  → variable
       if (ast.a.t === 'var' && !(ast.a.name in MX.CONSTS) && !MX.names(ast.b).vars.has(ast.a.name)) {
-        const v = MX.evaluate(ast.b, scope);
-        st.vars[ast.a.name] = v;
-        return { src, kind: 'assign', text: `${ast.a.name} = ${MX.fmt(v)}`, value: v };
+        const name = ast.a.name;
+        const r = compute(src.slice(src.indexOf('=') + 1).trim(), ast.b);
+        setVar(name, r);
+        return { src, kind: 'assign', text: `${name} = ${r.display}`, value: r.value };
       }
       // f(x) = x² + 1  → function
       if (ast.a.t === 'call' && ast.a.args.length && ast.a.args.every((a) => a.t === 'var')) {
@@ -76,16 +79,76 @@
         const { fn } = MX.compile(diff, [v], scope);
         let roots = MX.findRoots(fn, -1000, 1000, 20000);
         if (!roots.length) { const r = MX.solve(fn, 1); if (isFinite(r)) roots = [r]; }
-        if (!roots.length) throw new MX.MathError(`No real solution for ${v} found`, 0);
+        if (!roots.length) {
+          // polynomials always have complex roots
+          const c = polyCoefs(fn);
+          if (c && c.length > 1) {
+            const zs = LinAlg.polyRoots(c).map((z) => CalcX.cString(z.map((x) => +x.toPrecision(12))));
+            return { src, kind: 'solve', text: 'no real solution · complex: ' + zs.map((z) => `${v} = ${z}`).join('   or   ') };
+          }
+          throw new MX.MathError(`No real solution for ${v} found`, 0);
+        }
         roots = roots.map((r) => (Math.abs(r - Math.round(r)) < 1e-9 ? Math.round(r) : r));
         st.vars.ans = roots[0];
         return { src, kind: 'solve', text: roots.slice(0, 12).map((r) => `${v} = ${MX.fmt(r)}`).join('   or   ') + (roots.length > 12 ? '  …' : ''), value: roots[0] };
       }
       if (free.size > 1) throw new MX.MathError(`Unknown names: ${[...free].join(', ')} — to solve, use one unknown`, 0);
     }
-    const v = MX.evaluate(ast, scope);
-    st.vars.ans = v;
-    return { src, kind: 'value', value: v };
+    const r = compute(src, ast);
+    setVar('ans', r);
+    return { src, kind: 'value', value: r.value, display: r.display, alt: r.alt, exact: r.exact };
+  }
+
+  // Stores a computed result in a variable (real, exact and complex parts kept in step).
+  function setVar(name, r) {
+    st.vars[name] = r.value == null ? NaN : r.value;
+    if (r.complex && r.complex[1] !== 0) st.cvars[name] = r.complex; else delete st.cvars[name];
+    if (r.q) scope.exactVars[name] = r.q; else delete scope.exactVars[name];
+  }
+
+  // Coefficients (low → high) when fn is a polynomial of degree ≤ 10, else null.
+  function polyCoefs(fn) {
+    const xs = Array.from({ length: 14 }, (_, i) => i - 6), ys = xs.map(fn);
+    if (!ys.every(isFinite)) return null;
+    const sc = Math.max(1, ...ys.map(Math.abs));
+    let d = ys.slice(), deg = -1;
+    for (let k = 0; k <= 12; k++) { if (d.every((v) => Math.abs(v) < 1e-9 * sc)) { deg = k - 1; break; } d = d.slice(1).map((v, i) => v - d[i]); }
+    if (deg < 1 || deg > 10) return null;
+    const pts = Array.from({ length: deg + 1 }, (_, i) => i - Math.floor(deg / 2));
+    const c = LinAlg.solve(pts.map((x) => Array.from({ length: deg + 1 }, (_, j) => x ** j)), pts.map((x) => [fn(x)])).X.map((r) => r[0]);
+    return c.map((v) => (Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : v));
+  }
+
+  // Evaluates an expression the best available way: with units, as a real number (plus its exact
+  // rational / big-integer form), or as a complex number. Returns { display, alt, value, exact, complex, q }.
+  function compute(src, ast, preview = false) {
+    const u = CalcX.units(src, scope); // throws for unit mistakes such as 3 m + 2 s
+    if (u) return { display: u.text, alt: u.alt || '', value: u.value };
+    let v, err = null;
+    try { v = MX.evaluate(ast, scope); } catch (e) { err = e; }
+    const usesI = MX.names(ast).vars.has('i') && !('i' in st.vars);
+    const usesC = [...MX.names(ast).vars].some((n) => st.cvars[n]);
+    if (!err && !Number.isNaN(v) && !usesI && !usesC) {
+      const q = preview ? null : CalcX.exact(ast, scope);
+      if (q && q.d === 1n && (Math.abs(v) >= 1e16 || !isFinite(v))) {
+        const s = CalcX.qString(q);
+        return { display: CalcX.group(s), alt: `${s.replace('-', '').length} digits` + (isFinite(v) ? ` · ≈ ${MX.fmt(v)}` : ''), value: v, exact: s, q };
+      }
+      let alt = describe(v);
+      if (q && q.d !== 1n) {
+        const s = CalcX.qString(q);
+        if (!alt.includes(s) && s.length < 300) alt = (alt ? alt + '   ·   ' : '') + `exactly ${s}`;
+      }
+      return { display: MX.fmt(v), alt, value: v, q: q || null };
+    }
+    try {
+      const z = CalcX.complex(ast, { vars: st.vars, cvars: st.cvars, funcs: scope.funcs });
+      if (isFinite(z[0]) && isFinite(z[1])) {
+        return { display: CalcX.cString(z), alt: z[1] !== 0 ? CalcX.polarString(z) : describe(z[0]), value: z[1] === 0 ? z[0] : null, complex: z };
+      }
+    } catch (e2) { if (!err) err = e2; }
+    if (err) throw err;
+    return { display: 'undefined', alt: '', value: NaN };
   }
 
   function describe(v) {
@@ -99,9 +162,9 @@
     const result = h.error
       ? el('div', { class: 'cx-res err' }, h.error)
       : h.kind === 'value'
-        ? el('div', { class: 'cx-res', title: 'Click to use this value', onclick: () => insert(MX.fmt(h.value)) }, '= ' + MX.fmt(h.value))
+        ? el('div', { class: 'cx-res', title: 'Click to use this value', onclick: () => insert(h.exact || (h.value != null && isFinite(h.value) ? MX.fmt(h.value) : 'ans')) }, '= ' + (h.display || MX.fmt(h.value)))
         : el('div', { class: 'cx-res small' }, h.text);
-    const alt = !h.error && h.kind === 'value' ? describe(h.value) : '';
+    const alt = !h.error && h.kind === 'value' ? (h.alt !== undefined ? h.alt : describe(h.value)) : '';
     return el('div', { class: 'cx-entry' },
       el('div', { class: 'cx-src mono', title: 'Click to edit', onclick: () => { input.value = h.src; input.focus(); updatePreview(); } }, h.src),
       result,
@@ -112,7 +175,7 @@
   function renderHistory() {
     histEl.replaceChildren(...(st.history.length ? st.history.map(entryEl) : [el('div', { class: 'cx-empty' },
       el('p', {}, 'Type a calculation and press Enter.'),
-      el('p', { class: 'hint' }, 'Try:  2^10   ·   sin(30°)   ·   5!   ·   sqrt(2)   ·   2x + 3 = 11   ·   f(x) = x^2 + 1   ·   int(x^2, x, 0, 3)'))]));
+      el('p', { class: 'hint' }, 'Try:  2^10   ·   sin(30°)   ·   30!   ·   sqrt(-4)   ·   2x + 3 = 11   ·   5 km/h in m/s   ·   f(x) = x^2 + 1   ·   int(x^2, x, 0, 3)'))]));
     histEl.scrollTop = histEl.scrollHeight;
     renderVars();
   }
@@ -122,8 +185,8 @@
     for (const [k, v] of Object.entries(st.vars)) {
       rows.push(el('div', { class: 'cx-var' },
         el('button', { type: 'button', class: 'linkish mono', onclick: () => insert(k) }, k),
-        el('span', { class: 'mono' }, MX.fmt(v)),
-        k === 'ans' ? el('span') : el('button', { type: 'button', class: 'icon danger', title: 'Delete', onclick: () => { delete st.vars[k]; save(); renderVars(); } }, '×')));
+        el('span', { class: 'mono' }, st.cvars[k] ? CalcX.cString(st.cvars[k]) : scope.exactVars[k] ? CalcX.qString(scope.exactVars[k]) : MX.fmt(v)),
+        k === 'ans' ? el('span') : el('button', { type: 'button', class: 'icon danger', title: 'Delete', onclick: () => { delete st.vars[k]; delete st.cvars[k]; delete scope.exactVars[k]; save(); renderVars(); } }, '×')));
     }
     for (const [k, d] of Object.entries(st.defs)) {
       rows.push(el('div', { class: 'cx-var' },
@@ -142,8 +205,7 @@
       angles();
       const ast = MX.parse(src);
       if (ast.t === 'cmp' && ast.op === '=') { preview.textContent = 'Enter to ' + (ast.a.t === 'var' || ast.a.t === 'call' ? 'define' : 'solve'); return; }
-      const v = MX.evaluate(ast, scope);
-      preview.textContent = '= ' + MX.fmt(v);
+      preview.textContent = '= ' + compute(src, ast, true).display;
     } catch (e) {
       preview.textContent = e.message;
       preview.className = 'cx-preview err';
@@ -193,7 +255,7 @@
   const KEYS = [
     [['2nd', () => { st.second = !st.second; paintKeys(); }, null, null, 'fn toggle'], ['DEG', () => { st.deg = !st.deg; save(); paintKeys(); updatePreview(); }, null, null, 'fn'], ['(', '('], [')', ')'], ['AC', () => { input.value = ''; updatePreview(); input.focus(); }, null, null, 'danger'], ['⌫', backspace, null, null, 'fn']],
     [['sin', 'sin(', 'sin⁻¹', 'asin('], ['cos', 'cos(', 'cos⁻¹', 'acos('], ['tan', 'tan(', 'tan⁻¹', 'atan('], ['ln', 'ln(', 'eˣ', 'exp('], ['log', 'log(', '10ˣ', '10^('], ['x⁻¹', '^(-1)', '|x|', 'abs(']],
-    [['x²', '^2', '√x', 'sqrt('], ['xʸ', '^', 'ʸ√x', 'root('], ['√', 'sqrt(', '∛', 'cbrt('], ['n!', '!', 'nPr', 'nPr('], ['π', 'π', 'τ', 'τ'], ['e', 'e', 'φ', 'φ']],
+    [['x²', '^2', '√x', 'sqrt('], ['xʸ', '^', 'ʸ√x', 'root('], ['√', 'sqrt(', '∛', 'cbrt('], ['n!', '!', 'nPr', 'nPr('], ['π', 'π', 'i', 'i'], ['e', 'e', 'φ', 'φ']],
     [['7', '7', null, null, 'num'], ['8', '8', null, null, 'num'], ['9', '9', null, null, 'num'], ['÷', '/', null, null, 'op'], ['nCr', 'nCr(', 'gcd', 'gcd('], ['%', '%', 'mod', 'mod(']],
     [['4', '4', null, null, 'num'], ['5', '5', null, null, 'num'], ['6', '6', null, null, 'num'], ['×', '*', null, null, 'op'], [',', ', '], ['ans', 'ans']],
     [['1', '1', null, null, 'num'], ['2', '2', null, null, 'num'], ['3', '3', null, null, 'num'], ['−', '-', null, null, 'op'], ['x', 'x', 'y', 'y'], ['=', submit, null, null, 'eq']],
@@ -245,6 +307,9 @@
         el('li', {}, '30° — degrees in either angle mode'),
         el('li', {}, '50% = 0.5, 5! factorial, |x| absolute value'),
         el('li', {}, '0xFF, 0b1010 — hexadecimal and binary'),
+        el('li', {}, 'Complex numbers: sqrt(-4), (2 + 3i)(1 − i), e^(iπ) — i is on 2nd + π'),
+        el('li', {}, 'Exact results: 30!, 2^200, 1/3 + 1/6 (whole numbers of any size, exact fractions)'),
+        el('li', {}, 'Units: 5 km/h in m/s, 3 ft + 20 cm, 60 mph * 2 h in km, 100 °F in °C'),
         el('li', {}, 'a = 5 stores a variable; f(x) = x^2 defines a function'),
         el('li', {}, '2x + 3 = 11 solves for the unknown (all real solutions between −1000 and 1000)'),
         el('li', {}, 'Up / Down arrows: previous inputs · Esc: clear')));

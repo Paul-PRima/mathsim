@@ -291,7 +291,10 @@ const MX = (() => {
       // local minimum of |f| close to zero: a root that touches the axis
       if (i > 0 && isFinite(ys[i - 1]) && Math.abs(y0) <= Math.abs(ys[i - 1]) && Math.abs(y0) <= Math.abs(y1) && (y0 < 0) === (ys[i - 1] < 0) && (y0 < 0) === (y1 < 0)) {
         const m = goldenMin((x) => Math.abs(f(x)), xs[i - 1], xs[i + 1]);
-        if (Math.abs(f(m)) < 1e-10 * Math.max(1, scale)) add(m);
+        // a real double root: the minimum is (numerically) zero compared with the values right next to it
+        // — not merely small next to far-away values (x² + 4 has its minimum 4 at 0, not a root)
+        const near = Math.max(Math.abs(f(m - h)), Math.abs(f(m + h)));
+        if (Math.abs(f(m)) <= 1e-6 * near) add(m);
       }
     }
     if (isFinite(ys[n]) && ys[n] === 0) add(xs[n]);
@@ -479,9 +482,9 @@ const MX = (() => {
       if (/\s/.test(ch)) { i++; continue; }
       const rest = src.slice(i);
       let m = /^0x[0-9a-fA-F]+|^0b[01]+|^0o[0-7]+/.exec(rest);
-      if (m) { toks.push({ t: 'num', v: Number(m[0]), pos: i }); i += m[0].length; continue; }
+      if (m) { toks.push({ t: 'num', v: Number(m[0]), raw: m[0], pos: i }); i += m[0].length; continue; }
       m = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(rest);
-      if (m) { toks.push({ t: 'num', v: parseFloat(m[0]), pos: i }); i += m[0].length; continue; }
+      if (m) { toks.push({ t: 'num', v: parseFloat(m[0]), raw: m[0], pos: i }); i += m[0].length; continue; }
       m = ID_RE.exec(rest);
       if (m) { toks.push({ t: 'id', v: RENAME[m[0]] || m[0], pos: i }); i += m[0].length; continue; }
       if (SUPERS[ch] !== undefined) {
@@ -576,7 +579,7 @@ const MX = (() => {
     }
     function primary() {
       const tk = peek();
-      if (tk.t === 'num') { next(); return { t: 'num', v: tk.v }; }
+      if (tk.t === 'num') { next(); return { t: 'num', v: tk.v, raw: tk.raw }; } // raw: exact digits for exact arithmetic
       if (tk.t === 'id') {
         next();
         const name = tk.v;
