@@ -5,32 +5,44 @@ A workbench for mathematics. Sections (switch with the rail on the left; Ctrl+1 
 - **Calculator** — scientific calculator with history, degrees/radians, variables (`a = 5`), your own functions
   (`f(x) = x^2 + 1`), equation solving (`2x + 3 = 11`, complex roots when there are no real ones), integrals, sums,
   derivatives and 60+ functions. **Exact arithmetic** (`30!`, `2^200`, `1/3 + 1/6 = 1/2`), **complex numbers**
-  (`sqrt(-4)`, `(2 + 3i)(1 − i)`, `e^(iπ)`) and **units** (`5 km/h in m/s`, `3 ft + 20 cm`, `100 °F in °C`).
+  (`sqrt(-4)`, `(2 + 3i)(1 − i)`, `e^(iπ)`), **units** (`5 km/h in m/s`, `100 °F in °C`), **algebra**
+  (`expand`, `factor`, `simplify`, `derive`, `integrate`) and **vectors / matrices** (`[1, 2, 3] cross [4, 5, 6]`,
+  `det(M)`, `inv(M)`, `eig(M)`). 📈 sends a function straight to Graphing.
 - **Graphing** — `y = f(x)`, `x = f(y)`, polar, parametric, implicit equations, inequalities and points; sliders,
-  tracing, roots / extrema / intersections, value tables; **slope fields** for `y' = f(x, y)` with click-to-draw
-  solutions; **areas** (`between(f, g)`, `int(f, x, a, b)`); PNG and **SVG export**; **share links**; **undo/redo**.
+  tracing, roots / extrema / intersections, value tables; **slope fields**; **areas**; **data tables with fitted
+  curves** (linear … power, with R²); Fourier series examples; PNG / SVG export, **print / PDF with notes**;
+  share links; undo/redo.
 - **3D graphs** — surfaces `z = f(x, y)` and parametric surfaces, colour by height, contour lines, rotate and zoom.
-- **Geometry** — GeoGebra-style constructions: points (also on lines and circles), segments, lines, rays, circles,
-  midpoints, perpendiculars, parallels, perpendicular bisectors, intersections, angles and polygons; drag points
-  and everything follows; lengths, angles and areas measured live; undo/redo.
-- **Statistics** — descriptive statistics with histogram and box plot; regression (six models) with R² and
-  residuals; nine probability distributions; t-tests and a proportion z-test.
-- **Probability lab** — dice sums, coin flips, a Galton board and Monte Carlo π, live next to the theory.
+- **Geometry** — constructions with points, lines, circles, perpendiculars, bisectors, intersections, angles and
+  polygons; **reflect, rotate, translate, enlarge**; **loci and traces**; drag and everything follows; send the
+  construction to Graphing as equations.
+- **Statistics** — descriptive statistics, regression (six models), nine distributions, t-tests, z-test,
+  **χ² goodness-of-fit and independence tests, one-way ANOVA**, a **confidence-interval demo**, and
+  **CSV / Excel (.xlsx) import**.
+- **Probability lab** — dice, coins, Galton board, Monte Carlo π, **Monty Hall** (simulate or play), the
+  **birthday paradox**, **random walks** (1D / 2D) and **Markov chains** (editable matrix, stationary distribution).
 - **Matrices** — arithmetic, determinant, inverse, rank, RREF, eigenvalues and eigenvectors, linear systems.
 - **Algebra & tools** — equation and polynomial solvers, symbolic derivatives, integrals, triangle solver, number
   theory, GCD/LCM, sequences, base and unit converters.
-- **Practice** — endless generated exercises on 10 topics (English or German) with answer checking, scores and
-  worked solutions.
-- **Simulations** — Game of Life (six rules), 1D cellular automata, L-systems, Gray–Scott reaction–diffusion and
-  the Ulam prime spiral.
+- **Practice** — endless generated exercises on 15 topics (incl. trigonometry, logarithms, integrals, vectors and
+  word problems) in English or German, with worked solutions, a progress chart, **review of weak topics** and
+  **printable worksheets with answer keys** (PDF).
+- **Simulations** — patterns (Game of Life, 1D automata, L-systems, reaction–diffusion, Ulam spiral), physics
+  (**pendulum and chaotic double pendulum, projectile with air resistance, Kepler orbits**), **Fourier epicycles**
+  (draw a shape, circles redraw it) and algorithms (**seven sorting algorithms, BFS / Dijkstra / A* path finding**).
 - **Fractals** — escape-time fractals with unlimited deep zoom, complex functions (domain colouring), strange
   attractors and bifurcation diagrams, IFS flames, vector fractals, ray-marched 3D fractals, zoom videos.
+
+**Ctrl+K** opens a command palette: jump to any section, tool, example or fractal preset, or type a calculation.
+**Settings** (bottom of the rail): German or English interface, dark / light / system theme, text size.
 
 Everything you type is saved between sessions. (Formerly *Fractalsim*; the saved fractal library carries over.)
 
 ## Run
 
-- **Desktop app:** `dist/Mathsim-win32-x64/Mathsim.exe`
+- **Install:** run `dist/installer/Mathsim-Setup-5.0.0.exe` — installs for the current user (no admin rights), with a
+  Start-menu entry, a desktop shortcut and an uninstaller (Settings › Apps). Your saved data is kept on uninstall.
+- **Without installing:** `dist/Mathsim-win32-x64/Mathsim.exe`
 - **Browser:** open `index.html` directly (Chrome or Edge)
 
 ## Rebuild the desktop app
@@ -41,6 +53,7 @@ Requires [Node.js](https://nodejs.org).
 npm install
 npm start          # run from source
 npm run package    # build dist/Mathsim-win32-x64/
+npm run installer  # package, then build dist/installer/Mathsim-Setup-<version>.exe (settings: package.json › build)
 npm test           # run the automated tests (tests/*.test.js)
 ```
 
@@ -63,7 +76,11 @@ newly exposed strips; zooming shows the previous image stretched until the new t
 
 | File | Purpose |
 | --- | --- |
-| `js/shell.js` | Navigation rail, home page, switching sections |
+| `js/shell.js` | Navigation rail, home page, settings, command palette, theme, PDF printing |
+| `js/i18n.js`, `js/i18n-de.js` | Interface language: translates the page from a German dictionary (with patterns for text containing numbers) |
+| `js/algebra.js` | Exact polynomial algebra (expand / factor / simplify) and vectors / matrices for the calculator |
+| `js/datafile.js` | CSV and .xlsx reading for Statistics |
+| `js/fractal/*.js` | The fractal explorer UI (state, rendering, interaction, export, library, side panel, start-up) |
 | `js/mathexpr.js` | Real-number expression engine (parser → JS), special functions, distributions, numeric calculus |
 | `js/calc.js`, `js/graph.js`, `js/stats.js`, `js/matrix.js`, `js/tools.js` | The math sections |
 | `js/calcx.js` | Exact (BigInt), complex and unit-aware evaluation for the calculator |

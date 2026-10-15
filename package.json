@@ -1,17 +1,45 @@
 {
   "name": "mathsim",
   "productName": "Mathsim",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "Mathsim — calculator, 2D/3D graphing, geometry, statistics, probability, matrices, practice, simulations and fractals",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "package": "electron-packager . Mathsim --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=^/dist --ignore=^/tools --ignore=^/tests --ignore=^/[.]git --ignore=^/node_modules --prune=false --app-copyright=\"Mathsim\"",
-    "test": "node tests/run.js"
+    "test": "node tests/run.js",
+    "installer": "npm run package && node tools/build-installer.js"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",
-    "electron": "^33.2.1"
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "author": "Mathsim",
+  "build": {
+    "appId": "app.mathsim.desktop",
+    "productName": "Mathsim",
+    "copyright": "Mathsim",
+    "directories": {
+      "output": "dist/installer"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createStartMenuShortcut": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Mathsim",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "Mathsim",
+      "artifactName": "Mathsim-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
