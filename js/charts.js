@@ -36,12 +36,17 @@ const Charts = (() => {
   }
 
   // Axes, grid and tick labels for a data range. Returns { ctx, X, Y, x0, x1, y0, y1 } (plot box in px).
-  function frame(cv, { xmin, xmax, ymin, ymax, xlabel = '', ylabel = '', xticks = true, discreteX = false }) {
+  function frame(cv, { xmin, xmax, ymin, ymax, xlabel = '', ylabel = '', xticks = true, discreteX = false, xfmt = null, equal = false }) {
     const { ctx, w, h } = setup(cv);
     if (!(xmax > xmin)) { xmin -= 1; xmax += 1; }
     if (!(ymax > ymin)) { ymin -= 1; ymax += 1; }
     const pad = { l: 52, r: 14, t: 12, b: xlabel ? 40 : 28 };
     const x0 = pad.l, x1 = w - pad.r, y0 = pad.t, y1 = h - pad.b;
+    if (equal) { // same scale on both axes: widen whichever range is too small
+      const sx = (xmax - xmin) / (x1 - x0), sy = (ymax - ymin) / (y1 - y0), s = Math.max(sx, sy);
+      const cx = (xmin + xmax) / 2, cy = (ymin + ymax) / 2;
+      xmin = cx - (s * (x1 - x0)) / 2; xmax = cx + (s * (x1 - x0)) / 2; ymin = cy - (s * (y1 - y0)) / 2; ymax = cy + (s * (y1 - y0)) / 2;
+    }
     const X = (v) => x0 + ((v - xmin) / (xmax - xmin)) * (x1 - x0);
     const Y = (v) => y1 - ((v - ymin) / (ymax - ymin)) * (y1 - y0);
     ctx.font = '11px system-ui, sans-serif';
@@ -67,7 +72,7 @@ const Charts = (() => {
         ctx.strokeStyle = line;
         ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
         ctx.fillStyle = muted;
-        ctx.fillText(tickLabel(v, xt.step), x, y1 + 6);
+        ctx.fillText(xfmt ? xfmt(v) : tickLabel(v, xt.step), x, y1 + 6);
       }
     }
     ctx.strokeStyle = Theme.frame;

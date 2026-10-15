@@ -776,3 +776,30 @@ kbd { font: 11px ui-monospace, Consolas, monospace; padding: 2px 6px; border-rad
 .pr-acc-bar i { display: block; height: 100%; }
 .pr-acc b { font-weight: 500; color: var(--muted); text-align: right; }
 .pr-ws-topics { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-bottom: 10px; }
+
+/* probability lab extras */
+.pl-doors { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 6px 0 8px; }
+.pl-door { width: 64px; height: 92px; font-size: 22px; border-radius: 8px 8px 2px 2px; background: linear-gradient(#8c5a2b, #6b4220); color: #fff; border: 2px solid #4a2d14; }
+.pl-door.open { background: var(--panel-2); color: var(--text); border-style: dashed; }
+.pl-door.picked { outline: 3px solid #4dabf7; outline-offset: 2px; }
+.pl-door.final { outline-color: #51cf66; }
+.pl-msg { text-align: center; color: var(--muted); min-height: 1.4em; margin-bottom: 6px; }
+.pl-bdays { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; max-height: 76px; overflow: auto; }
+.pl-bday { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); color: var(--muted); }
+.pl-bday.hit { background: #ff922b; color: #111; font-weight: 600; }
+.pl-inline-slider { min-width: 240px; }
+.pl-markov-wrap { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr); gap: 18px; }
+.pl-markov { width: 100%; height: 440px; display: block; }
+@media (max-width: 900px) { .pl-markov-wrap { grid-template-columns: 1fr; } }
+.pl-ctl { align-items: center; }
+
+/* simulations extras */
+.sim-groups { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 14px; }
+.sim-group { display: flex; flex-direction: column; gap: 4px; }
+.sim-group .page-tabs { margin-bottom: 0; }
+.sim-group-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding-left: 4px; }
+.sim-canvas { width: 100%; height: 440px; display: block; border-radius: 10px; background: var(--panel-2); touch-action: none; cursor: crosshair; }
+.sim-canvas.wide { height: 460px; }
+.sim-split { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1fr); gap: 18px; align-items: start; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; }
+@media (max-width: 900px) { .sim-split, .grid3 { grid-template-columns: 1fr; } }
