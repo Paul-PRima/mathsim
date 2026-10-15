@@ -97,13 +97,17 @@ ipcMain.handle('save-pdf', async (e, html, name) => {
   });
   if (canceled || !filePath) return null;
   const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  // a temporary file rather than a data: URL, which has a size limit (graphs as SVG can be large)
+  const tmp = path.join(app.getPath('temp'), `mathsim-print-${process.pid}-${Date.now()}.html`);
   try {
-    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    fs.writeFileSync(tmp, html, 'utf8');
+    await win.loadFile(tmp);
     const pdf = await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'default' } });
     fs.writeFileSync(filePath, pdf);
     return filePath;
   } finally {
     win.destroy();
+    fs.rm(tmp, { force: true }, () => {});
   }
 });
 

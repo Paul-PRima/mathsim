@@ -1055,12 +1055,51 @@
     }
     toString() { return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.w}" height="${this.h}" viewBox="0 0 ${this.w} ${this.h}">\n${this.out.join('\n')}\n</svg>\n`; }
   }
-  function saveSVG() {
-    const real = ctx;
+  function svgString(light = Theme.light) {
+    const real = ctx, was = Theme.light;
     const svg = new SvgCtx(W, H, (font, t) => { real.font = font; return real.measureText(t); });
     ctx = svg;
-    try { drawScene(); } finally { ctx = real; }
-    U.download(new Blob([svg.toString()], { type: 'image/svg+xml' }), 'graph.svg');
+    if (light !== was) Theme.set(light); // e.g. a white page for printing; switched back below before anything paints
+    try { drawScene(); } finally { ctx = real; if (light !== was) Theme.set(was); }
+    return svg.toString();
+  }
+  function saveSVG() { U.download(new Blob([svgString()], { type: 'image/svg+xml' }), 'graph.svg'); }
+
+  // A printable page: the graph (as vector SVG), the expressions and your notes → PDF in the desktop app.
+  function printDialog() {
+    const title = el('input', { type: 'text', value: S.printTitle || 'Graph' });
+    const notes = el('textarea', { class: 'gx-notes', rows: 6, placeholder: 'Notes, working, observations…' }, S.printNotes || '');
+    const chk = (label, on) => { const b = el('input', { type: 'checkbox' }); b.checked = on; return [b, el('label', { class: 'check' }, b, el('span', {}, label))]; };
+    const [list, listL] = chk('List the expressions', true), [white, whiteL] = chk('White background', true);
+    const back = el('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) back.remove(); } },
+      el('div', { class: 'modal wide' }, el('div', { class: 'modal-title' }, 'Print / PDF'),
+        el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, 'Title'), title),
+        el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, 'Notes'), notes), listL, whiteL,
+        el('div', { class: 'btn-row' }, el('button', { type: 'button', onclick: () => back.remove() }, 'Cancel'),
+          el('button', { type: 'button', class: 'primary', onclick: () => {
+            S.printTitle = title.value; S.printNotes = notes.value;
+            back.remove();
+            Shell.savePDF(printHTML(title.value, notes.value, list.checked, white.checked), (title.value.trim() || 'Graph').replace(/[\/:*?"<>|]+/g, '_') + '.pdf');
+          } }, 'Create PDF'))));
+    document.body.append(back);
+    title.select();
+  }
+  function printHTML(title, notes, withList, white) {
+    const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const svg = svgString(white).replace(/<svg /, '<svg class="graph" preserveAspectRatio="xMidYMid meet" ');
+    const items = S.items.filter((it) => !it.hidden && (it.text.trim() || it.type === 'table')).map((it) =>
+      `<li><span class="dot" style="background:${esc(it.color)}"></span><code>${it.type === 'table' ? esc(`${I18n.t('table')}: ${(it.rows || []).length} ${I18n.t('points')}${it.fit && it.fit !== 'none' ? ` (${it.fit})` : ''}`) : esc(it.text)}</code></li>`).join('');
+    const v = { xmin: fromPx(0), xmax: fromPx(W), ymin: S.view.cy - (H / 2) * S.view.s, ymax: S.view.cy + (H / 2) * S.view.s };
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+      @page { size: A4; margin: 14mm; }
+      body { font: 11pt/1.45 "Segoe UI", system-ui, sans-serif; color: #111; margin: 0; }
+      h1 { font-size: 17pt; margin: 0 0 2px; } .meta { color: #666; font-size: 9pt; margin-bottom: 10px; }
+      .graph { width: 100%; height: auto; max-height: 150mm; border: 1px solid #ccc; ${white ? '' : 'background: #0c0e13;'} }
+      ul { list-style: none; padding: 0; margin: 10px 0; columns: 2; } li { margin: 3px 0; break-inside: avoid; }
+      .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+      code { font: 10.5pt Consolas, monospace; } .notes { white-space: pre-wrap; border-top: 1px solid #ccc; padding-top: 8px; margin-top: 8px; }
+    </style></head><body><h1>${esc(title)}</h1><div class="meta">${new Date().toLocaleDateString(I18n.lang === 'de' ? 'de-DE' : 'en-GB')} · x: ${MX.fmt(+v.xmin.toPrecision(4))} … ${MX.fmt(+v.xmax.toPrecision(4))}, y: ${MX.fmt(+v.ymin.toPrecision(4))} … ${MX.fmt(+v.ymax.toPrecision(4))} · Mathsim</div>
+      ${svg}${withList && items ? `<ul>${items}</ul>` : ''}${notes.trim() ? `<div class="notes">${esc(notes)}</div>` : ''}</body></html>`;
   }
 
   // ---------------------------------------------------------------- page
@@ -1108,7 +1147,8 @@
           U.el('button', { type: 'button', title: 'Zoom out', onclick: () => zoomAt(W / 2, H / 2, 1 / 0.7) }, '−'),
           U.el('button', { type: 'button', title: 'Home view', onclick: () => { S.view = { ...HOME }; viewChanged(); } }, '⌂'),
           U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓'),
-          U.el('button', { type: 'button', title: 'Save as SVG (vector)', class: 'gx-svg', onclick: saveSVG }, 'SVG')),
+          U.el('button', { type: 'button', title: 'Save as SVG (vector)', class: 'gx-svg', onclick: saveSVG }, 'SVG'),
+          U.el('button', { type: 'button', title: 'Print / PDF with notes', onclick: printDialog }, '🖨')),
         coordEl)));
     bindCanvas();
     new ResizeObserver(() => { requestDraw(); schedulePois(); }).observe(cv);
@@ -1148,6 +1188,7 @@
       { label: 'Add a table of values', keywords: 'table data points fit regression wertetabelle', run: () => { const n = newTable(); S.items.push(n); refresh(true); setActive(n.id); } },
       { label: 'Share this graph', keywords: 'link share teilen', run: () => shareLink() },
       { label: 'Save the graph as SVG', keywords: 'export vector svg', run: () => saveSVG() },
+      { label: 'Print the graph / save as PDF', keywords: 'print pdf drucken notes', run: () => printDialog() },
       ...EXAMPLES.map((ex) => ({ label: `Graph example: ${ex.name}`, keywords: 'example beispiel ' + ex.name, run: () => loadExample(ex) })),
     ],
     label: 'Graphing', key: 3, order: 3, root: () => document.getElementById('mod-graph'), init,
