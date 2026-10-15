@@ -173,7 +173,7 @@ I18n.add('de', {
   'Between-groups SS': 'Quadratsumme zwischen den Gruppen', 'Within-groups SS': 'Quadratsumme innerhalb der Gruppen', 'Categories': 'Kategorien', Observed: 'Beobachtet', Expected: 'Erwartet', 'Table size': 'Tabellengröße',
   'Smallest expected count': 'Kleinste erwartete Häufigkeit', 'Some expected counts are below 5 — the χ² approximation may be poor.': 'Einige erwartete Häufigkeiten sind kleiner als 5 — die χ²-Näherung ist dann ungenau.',
   'Descriptive statistics (mean, median, standard deviation)': 'Beschreibende Statistik (Mittelwert, Median, Standardabweichung)', 'Regression / curve fitting': 'Regression / Kurvenanpassung',
-  'Probability distributions': 'Wahrscheinlichkeitsverteilungen', 'Confidence interval demo': 'Konfidenzintervall-Demo', 'Choose columns': 'Spalten wählen', 'Use these': 'Übernehmen',
+  'Probability distributions': 'Wahrscheinlichkeitsverteilungen', Probabilities: 'Wahrscheinlichkeiten', 'Confidence interval demo': 'Konfidenzintervall-Demo', 'Choose columns': 'Spalten wählen', 'Use these': 'Übernehmen',
   'The file has no columns of numbers': 'Die Datei hat keine Zahlenspalten', 'Could not read the file: ': 'Die Datei konnte nicht gelesen werden: ', 'Enter some numbers.': 'Gib einige Zahlen ein.',
   'Enter at least two x, y pairs.': 'Gib mindestens zwei x-y-Paare ein.', 'Column': 'Spalte', 'Each sample needs at least 2 values': 'Jede Stichprobe braucht mindestens 2 Werte',
   'Sample 1 needs at least 2 values': 'Stichprobe 1 braucht mindestens 2 Werte', 'Confidence level must be between 0 and 1, e.g. 0.95': 'Das Konfidenzniveau muss zwischen 0 und 1 liegen, z. B. 0.95',

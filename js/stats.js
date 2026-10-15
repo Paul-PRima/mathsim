@@ -448,7 +448,7 @@
     const view = el('div', { class: 'st-grid' },
       el('div', { class: 'pane' },
         el('h3', {}, 'Distribution'), el('label', { class: 'ctl' }, sel), paramsBox,
-        el('h3', {}, 'Probability'), el('label', { class: 'ctl' }, mode), rows.x, rows.a, rows.b, rows.p,
+        el('h3', {}, 'Probabilities'), el('label', { class: 'ctl' }, mode), rows.x, rows.a, rows.b, rows.p,
         el('p', { class: 'hint' }, 'Limits accept expressions such as 1.96, -inf or mean + 2.')),
       el('div', { class: 'pane' }, result, cv, info));
     update();

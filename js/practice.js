@@ -453,7 +453,7 @@ const Practice = (() => {
     level.value = st.level;
     const key = el('input', { type: 'checkbox' }); key.checked = true;
     const steps = el('input', { type: 'checkbox' }); steps.checked = false;
-    const back = el('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) back.remove(); } },
+    const back = el('div', { class: 'modal-back', 'data-no-i18n': '', onmousedown: (e) => { if (e.target === back) back.remove(); } },
       el('div', { class: 'modal wide' }, el('div', { class: 'modal-title' }, T('Worksheet', 'Arbeitsblatt')),
         el('div', { class: 'pr-ws-topics' }, boxes),
         el('div', { class: 'grid2' }, el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, T('Exercises', 'Aufgaben')), count), el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, T('Level', 'Niveau')), level)),
@@ -499,15 +499,22 @@ const Practice = (() => {
       renderProgress();
       levels.replaceChildren(...[T('Easy', 'Leicht'), T('Medium', 'Mittel'), T('Hard', 'Schwer')].map((l, i) => el('button', { type: 'button', class: st.level === i ? 'on' : '', onclick: () => { st.level = i; save(); paint(); next(); } }, l)));
       langSeg.replaceChildren(...[['en', 'English'], ['de', 'Deutsch']].map(([k, l]) => el('button', { type: 'button', class: st.lang === k ? 'on' : '', onclick: () => { st.lang = k; save(); paint(); next(); } }, l)));
+      wsBtn.textContent = T('🖨 Worksheet / PDF…', '🖨 Arbeitsblatt / PDF…');
+      progSummary.textContent = T('Progress', 'Fortschritt');
+      hintEl.textContent = T('Answers can be numbers, fractions (3/4) or expressions; separate several answers with commas. Derivatives and antiderivatives are checked by value, so any equivalent form counts.',
+        'Antworten können Zahlen, Brüche (3/4) oder Ausdrücke sein; mehrere Antworten durch Kommas trennen. Ableitungen und Stammfunktionen werden über Werte geprüft, jede gleichwertige Form zählt.');
     };
+    // the exercises have their own language (above), so the interface dictionary leaves this part alone
+    const wsBtn = U.el('button', { type: 'button', onclick: worksheetDialog }), progSummary = el('summary'), hintEl = el('p', { class: 'hint' });
     paint();
     root.append(el('div', { class: 'page pr-page' },
       el('div', { class: 'page-head' }, el('h2', {}, 'Practice'), el('p', {}, 'New exercises every time — answer, check, and see the worked solution. Works offline.')),
-      el('div', { class: 'pane pr-setup' }, topics, el('div', { class: 'pr-setup-row' }, levels, langSeg, scoreEl)),
-      card,
-      el('div', { class: 'btn-row' }, U.el('button', { type: 'button', onclick: worksheetDialog }, '🖨 Worksheet / PDF…')),
-      el('details', { class: 'pane pr-progress' }, el('summary', {}, 'Progress'), progEl = el('div')),
-      el('p', { class: 'hint' }, 'Answers can be numbers, fractions (3/4) or expressions; separate several answers with commas. Derivatives and antiderivatives are checked by value, so any equivalent form counts.')));
+      el('div', { 'data-no-i18n': '' },
+        el('div', { class: 'pane pr-setup' }, topics, el('div', { class: 'pr-setup-row' }, levels, langSeg, scoreEl)),
+        card,
+        el('div', { class: 'btn-row' }, wsBtn),
+        el('details', { class: 'pane pr-progress' }, progSummary, progEl = el('div')),
+        hintEl)));
     renderProgress();
     next();
   }
