@@ -143,7 +143,7 @@ const Shell = (() => {
   }
   let palette = null;
   function openPalette() {
-    if (palette) return;
+    if (palette && palette.isConnected) return;
     const input = el('input', { type: 'text', class: 'cp-input', placeholder: I18n.t('Search sections and tools, or type a calculation…'), spellcheck: 'false', autocomplete: 'off' });
     const list = el('div', { class: 'cp-list' });
     let items = [], sel = 0;
@@ -249,7 +249,7 @@ const Shell = (() => {
   function start() {
     // the fractal explorer is the existing #app; it goes last in the rail
     register('fractals', {
-      label: 'Fractals', order: 12, root: () => document.getElementById('app'),
+      label: 'Fractals', order: 12, root: () => document.getElementById('app'), init: () => FractalExplorer.start(),
       desc: 'Escape-time fractals with unlimited deep zoom, complex functions, strange attractors, IFS flames, vector and 3D fractals.',
       features: ['Mandelbrot & Julia', 'Deep zoom', 'Attractors', '3D', 'Zoom videos'],
     });

@@ -1,4 +1,5 @@
-// Fractal explorer — start-up. Loaded last: the files before it only declare things.
+// Fractal explorer — start-up. Loaded last: the files before it only declare things. The explorer starts the first
+// time the Fractals section opens (setting up WebGL can take a moment), not when the app starts.
 
 // ---------------------------------------------------------------- boot
 function init() {
@@ -24,7 +25,8 @@ function init() {
   resize();
   loadDef(readHash() || Defs.BUILTINS[0], { activeId: readHash() ? null : 'b:' + Defs.BUILTINS[0].name, push: false });
   requestAnimationFrame(frame);
-  Shell.addCommands('fractals', Defs.BUILTINS.map((d) => ({ label: `Fractal: ${d.name}`, keywords: `fractal preset ${d.type || ''}`, run: () => loadDef(d, { activeId: 'b:' + d.name }) })));
 }
 
-init();
+const FractalExplorer = { start: init };
+// palette entries for the built-in fractals (running one opens the section first, which starts the explorer)
+Shell.addCommands('fractals', Defs.BUILTINS.map((d) => ({ label: `Fractal: ${d.name}`, keywords: `fractal preset ${d.type || ''}`, run: () => loadDef(d, { activeId: 'b:' + d.name }) })));
