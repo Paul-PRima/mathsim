@@ -563,7 +563,7 @@ const Sims = (() => {
         }
         if (col) { ctx.fillStyle = col; ctx.fillRect(ox + x * c, oy - y * c, Math.max(1, c), Math.max(1, c)); }
       }
-      info.replaceChildren(el('div', { class: 'pl-stat' }, el('span', {}, 'numbers'), el('b', { class: 'mono' }, `1 … ${N}`)), mode === 'divisors' ? null : el('div', { class: 'pl-stat' }, el('span', {}, 'primes'), el('b', { class: 'mono' }, String(count))), el('div', { class: 'pl-stat hover-n' }, el('span', {}, 'under the mouse'), el('b', { class: 'mono' }, '—')));
+      info.replaceChildren(el('div', { class: 'pl-stat' }, el('span', {}, 'numbers'), el('b', { class: 'mono' }, `1 … ${N}`)), mode === 'divisors' ? '' : el('div', { class: 'pl-stat' }, el('span', {}, 'primes'), el('b', { class: 'mono' }, String(count))), el('div', { class: 'pl-stat hover-n' }, el('span', {}, 'under the mouse'), el('b', { class: 'mono' }, '—')));
     }
     cv.addEventListener('pointermove', (e) => {
       if (!layout) return;

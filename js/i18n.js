@@ -32,22 +32,24 @@ const I18n = (() => {
     const e = node.nodeType === 1 ? node : node.parentElement;
     return !e || !!e.closest(SKIP);
   }
+  const written = new WeakMap();   // text node → the text we last put there
   function doText(node) {
-    if (!orig.has(node)) orig.set(node, node.nodeValue);
-    const en = orig.get(node);
-    // the page changed the text since we stored it: that is the new English
-    if (node.nodeValue !== en && node.nodeValue !== t(en)) orig.set(node, node.nodeValue);
+    // new node, or the page changed the text since we last wrote it: what is there now is the English
+    if (!orig.has(node) || node.nodeValue !== written.get(node)) orig.set(node, node.nodeValue);
     const want = lang === 'en' ? orig.get(node) : t(orig.get(node));
     if (node.nodeValue !== want) node.nodeValue = want;
+    written.set(node, want);
   }
+  const writtenAttr = new WeakMap(); // element → { attribute: value we last wrote }
   function doAttrs(e) {
     for (const a of ['title', 'placeholder', 'aria-label']) {
       if (!e.hasAttribute(a)) continue;
       const key = 'i18n' + a.replace('-', '');
-      const cur = e.getAttribute(a);
-      if (e.dataset[key] === undefined || (cur !== e.dataset[key] && cur !== t(e.dataset[key]))) e.dataset[key] = cur;
+      const cur = e.getAttribute(a), w = writtenAttr.get(e) || {};
+      if (e.dataset[key] === undefined || cur !== w[a]) e.dataset[key] = cur;
       const want = lang === 'en' ? e.dataset[key] : t(e.dataset[key]);
       if (cur !== want) e.setAttribute(a, want);
+      w[a] = want; writtenAttr.set(e, w);
     }
   }
   function apply(root = document.body) {
@@ -85,5 +87,5 @@ const I18n = (() => {
     apply(document.body);
     watch();
   }
-  return { t, add, apply, setLang, get lang() { return lang; } };
+  return { t, add, apply, setLang, get lang() { return lang; }, get dict() { return DICT; } };
 })();
