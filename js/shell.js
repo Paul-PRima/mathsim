@@ -10,6 +10,11 @@ const Shell = (() => {
     stats: svg('<path d="M4 20h17"/><rect x="5" y="12" width="3" height="8"/><rect x="10.5" y="6" width="3" height="14"/><rect x="16" y="9" width="3" height="11"/>'),
     matrix: svg('<path d="M7 4H4v16h3M17 4h3v16h-3"/><path d="M8.5 9h.01M12 9h.01M15.5 9h.01M8.5 15h.01M12 15h.01M15.5 15h.01"/>'),
     tools: svg('<path d="M4 7h7M7.5 3.5v7"/><path d="M14 6h6"/><path d="M4.5 15.5l5 5M9.5 15.5l-5 5"/><path d="M14 16h6M14 20h6"/>'),
+    surface: svg('<path d="M3 15c3-1 4-6 9-6s6 5 9 6"/><path d="M3 15l9 5 9-5"/><path d="M12 9v11"/>'),
+    geometry: svg('<path d="M4 19 12 4l8 15z"/><circle cx="12" cy="13.5" r="4.2"/><circle cx="12" cy="4" r="1.2"/>'),
+    probability: svg('<rect x="3.5" y="8" width="10" height="10" rx="2"/><path d="M7 11h.01M10 15h.01"/><rect x="11" y="4" width="9" height="9" rx="2"/><path d="M14 7h.01M17 10h.01"/>'),
+    practice: svg('<path d="M4 5h12v14H4z"/><path d="M7 9h6M7 12.5h4"/><path d="m13 17 2 2 5-6"/>'),
+    simulations: svg('<rect x="4" y="4" width="4" height="4"/><rect x="10" y="4" width="4" height="4"/><rect x="10" y="10" width="4" height="4"/><rect x="16" y="10" width="4" height="4"/><rect x="4" y="16" width="4" height="4"/><rect x="10" y="16" width="4" height="4"/>'),
     fractals: svg('<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/>'),
   };
 
@@ -18,8 +23,9 @@ const Shell = (() => {
   const KEY = 'mathsim.module';
 
   function register(id, m) {
-    mods.set(id, Object.assign({ id, icon: ICONS[id] || ICONS.tools, built: false }, m));
+    mods.set(id, Object.assign({ id, icon: ICONS[id] || ICONS.tools, built: false, order: mods.size }, m));
   }
+  const ordered = () => [...mods.values()].sort((a, b) => a.order - b.order);
 
   function open(id) {
     const m = mods.get(id) || mods.get('home');
@@ -29,7 +35,11 @@ const Shell = (() => {
     for (const x of mods.values()) x.root().hidden = x !== m;
     document.querySelectorAll('#rail .rail-btn').forEach((b) => b.classList.toggle('on', b.dataset.id === m.id));
     current = m.id;
-    if (!m.built) { m.built = true; m.init && m.init(m.root()); }
+    if (!m.built) {
+      m.built = true;
+      if (m.init) m.init(m.root());
+      if (typeof C !== 'undefined') C.sync(); // show the current settings in the controls just created
+    }
     if (m.onShow) m.onShow();
     if (m.id !== 'fractals') document.title = m.label + ' · Mathsim';
     try { localStorage.setItem(KEY, m.id); } catch { /* storage blocked */ }
@@ -40,7 +50,7 @@ const Shell = (() => {
   function buildRail() {
     const rail = document.getElementById('rail');
     rail.append(el('div', { class: 'rail-logo', title: 'Mathsim' }));
-    for (const m of mods.values()) {
+    for (const m of ordered()) {
       const b = el('button', { type: 'button', class: 'rail-btn', 'data-id': m.id, title: `${m.label}${m.key ? ' (Ctrl+' + m.key + ')' : ''}`, onclick: () => open(m.id) });
       b.innerHTML = m.icon;
       b.append(el('span', {}, m.short || m.label));
@@ -50,7 +60,7 @@ const Shell = (() => {
 
   // ---------------------------------------------------------------- home page
   function buildHome(root) {
-    const cards = [...mods.values()].filter((m) => m.id !== 'home').map((m) => {
+    const cards = ordered().filter((m) => m.id !== 'home').map((m) => {
       const c = el('button', { type: 'button', class: 'home-card', onclick: () => open(m.id) });
       const ic = el('div', { class: 'home-icon' });
       ic.innerHTML = m.icon;
@@ -61,17 +71,17 @@ const Shell = (() => {
     root.append(el('div', { class: 'page home' },
       el('div', { class: 'home-hero' },
         el('div', { class: 'home-logo' }),
-        el('div', {}, el('h1', {}, 'Mathsim'), el('p', {}, 'A workbench for mathematics — calculate, graph, analyse data, work with matrices and explore fractals.'))),
+        el('div', {}, el('h1', {}, 'Mathsim'), el('p', {}, 'A workbench for mathematics — calculate, graph in 2D and 3D, construct, analyse data, simulate, practise and explore fractals.'))),
       el('div', { class: 'home-grid' }, cards),
-      el('p', { class: 'hint home-foot' }, 'Tip: Ctrl+1 … Ctrl+7 switch between sections. Everything you type is kept between sessions.')));
+      el('p', { class: 'hint home-foot' }, 'Tip: Ctrl+1 … Ctrl+9 open the first nine sections. Everything you type is kept between sessions.')));
   }
 
-  register('home', { label: 'Home', key: 1, root: () => document.getElementById('mod-home'), init: buildHome });
+  register('home', { label: 'Home', key: 1, order: 0, root: () => document.getElementById('mod-home'), init: buildHome });
 
   function start() {
     // the fractal explorer is the existing #app; it goes last in the rail
     register('fractals', {
-      label: 'Fractals', key: 7, root: () => document.getElementById('app'),
+      label: 'Fractals', order: 12, root: () => document.getElementById('app'),
       desc: 'Escape-time fractals with unlimited deep zoom, complex functions, strange attractors, IFS flames, vector and 3D fractals.',
       features: ['Mandelbrot & Julia', 'Deep zoom', 'Attractors', '3D', 'Zoom videos'],
     });

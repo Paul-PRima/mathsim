@@ -1009,7 +1009,7 @@
   }
 
   Shell.register('graph', {
-    label: 'Graphing', key: 3, root: () => document.getElementById('mod-graph'), init,
+    label: 'Graphing', key: 3, order: 3, root: () => document.getElementById('mod-graph'), init,
     onShow: () => requestDraw(),
     desc: 'Plot functions, polar and parametric curves, equations and inequalities. Sliders, tracing, roots, extrema and intersections.',
     features: ['y = f(x)', 'Polar & parametric', 'Implicit curves', 'Sliders'],

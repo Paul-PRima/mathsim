@@ -623,7 +623,7 @@
   }
 
   Shell.register('tools', {
-    label: 'Algebra & tools', short: 'Tools', key: 6, root: () => document.getElementById('mod-tools'), init,
+    label: 'Algebra & tools', short: 'Tools', key: 9, order: 9, root: () => document.getElementById('mod-tools'), init,
     desc: 'Equation and polynomial solvers, symbolic derivatives, integrals, triangle solver, prime factorization, base and unit converters.',
     features: ['Solve equations', 'Derivatives', 'Primes & factors', 'Units'],
   });

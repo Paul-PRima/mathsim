@@ -618,3 +618,78 @@ canvas.chart.tri { height: 200px; }
   .rail-btn span { display: none; }
 }
 
+
+/* ---------------- 3D graphs ---------------- */
+.sf-canvas, .sf-overlay { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.sf-canvas { cursor: grab; touch-action: none; }
+.sf-overlay { pointer-events: none; }
+.sf-controls { padding: 10px 14px; border-top: 1px solid var(--line); overflow-y: auto; max-height: 45%; }
+
+/* ---------------- geometry ---------------- */
+.geo-tools { position: absolute; top: 10px; left: 10px; right: 60px; display: flex; flex-wrap: wrap; gap: 4px; z-index: 2; }
+.geo-tool { display: flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: 12px; background: rgba(23, 26, 34, 0.94); }
+.geo-tool.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.geo-ic { font-size: 14px; width: 14px; text-align: center; }
+.geo-hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.geo-zoom { top: auto !important; bottom: 12px; }
+.geo-list { flex: 1; overflow-y: auto; border-top: 1px solid var(--line); padding: 4px 0; }
+.geo-row { display: grid; grid-template-columns: auto 34px 1fr auto; align-items: center; gap: 4px; padding: 3px 10px 3px 6px; font-size: 12.5px; }
+.geo-row.on { background: rgba(124, 92, 255, 0.1); }
+.geo-name { font-weight: 650; color: var(--accent-2); }
+.geo-desc { color: var(--text); }
+.geo-foot { margin: 8px 14px 12px; }
+
+/* ---------------- probability lab & simulations ---------------- */
+.pl-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.pl-ctl { margin: 0; }
+.pl-speed { margin-left: auto; width: 240px; }
+.pl-speed .ctl { margin: 0; }
+.pl-stats { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 6px 0 4px; }
+.pl-stat { display: flex; flex-direction: column; }
+.pl-stat span { color: var(--muted); font-size: 11px; }
+.pl-stat b { font-size: 15px; }
+.pl-faces, .pl-coins { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; margin-bottom: 4px; }
+.pl-die { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; background: #e8eaf0; color: #111; font-weight: 700; font-size: 16px; }
+.pl-coin { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.pl-coin.H { background: #ffc078; color: #111; }
+.pl-coin.T { background: #3d4353; color: var(--text); }
+canvas.pl-galton { height: 440px; }
+.pl-pi { display: grid; grid-template-columns: minmax(240px, 380px) 1fr; gap: 16px; }
+canvas.pl-square { width: 100%; aspect-ratio: 1; display: block; }
+canvas.sim-canvas { display: block; width: 100%; height: clamp(320px, 58vh, 640px); border-radius: 8px; background: #0c0e13; touch-action: none; }
+canvas.sim-rd { cursor: crosshair; }
+.sim-split { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+.sim-rules { min-height: 70px; font-size: 12.5px; }
+.inline-ctl { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.inline-ctl input { width: 70px; }
+
+/* ---------------- practice ---------------- */
+.pr-page { max-width: 900px; }
+.pr-topics { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.pr-topics .chip { font-family: inherit; font-size: 13px; padding: 5px 12px; }
+.pr-setup-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.pr-levels, .pr-lang { margin: 0; width: auto; }
+.pr-levels button, .pr-lang button { padding: 5px 14px; }
+.pr-score { margin-left: auto; display: flex; gap: 16px; color: var(--muted); }
+.pr-score b { color: var(--text); }
+.pr-card { margin-top: 16px; padding: 22px 24px; }
+.pr-q { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
+.pr-math { margin: 0 0 16px; padding: 14px 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font: 22px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: #e9e3ff; }
+.pr-answer-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pr-input { flex: 1; min-width: 200px; font-size: 18px !important; padding: 9px 12px !important; }
+.pr-feedback { min-height: 24px; margin: 12px 0 4px; font-weight: 600; }
+.pr-feedback.ok { color: #8ce99a; }
+.pr-feedback.bad { color: #ff8787; }
+.pr-steps { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.pr-steps-title { font-weight: 650; margin-bottom: 10px; }
+.ex-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; }
+.ex-steps li::marker { color: var(--accent-2); font-weight: 650; }
+.ex-text { line-height: 1.5; }
+.ex-math { margin: 6px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); font: 14px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: #e9e3ff; }
+.ex-answer { display: flex; gap: 12px; align-items: baseline; margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: rgba(81, 207, 102, 0.1); border: 1px solid rgba(81, 207, 102, 0.35); font: 600 16px/1.4 ui-monospace, Consolas, monospace; }
+.ex-answer span { font: 600 11px system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #8ce99a; }
+
+@media (max-width: 900px) {
+  .pl-pi, .sim-split { grid-template-columns: 1fr; }
+  .geo-tool span:last-child { display: none; }
+}

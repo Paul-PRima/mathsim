@@ -10,6 +10,7 @@ const ROOT = path.join(__dirname, '..');
 const ctx = vm.createContext({
   console, Math, setTimeout, clearTimeout, performance: { now: () => Date.now() },
   Shell: { register() {}, isActive: () => false },
+  C: {},
   document: { getElementById: () => null, createElement: () => ({ getContext: () => null }) },
   window: {},
 });
@@ -21,6 +22,7 @@ for (const f of ['practice.js', 'simulations.js', 'probability.js', 'geometry.js
   const p = path.join(ROOT, 'js', f);
   if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
 }
+for (const name of ['Geo', 'ProbLab', 'Practice', 'Sims']) { try { ctx[name] = vm.runInContext(name, ctx); } catch { /* module not present */ } }
 
 let passed = 0, failed = 0;
 const fail = (name, msg) => { failed++; console.log(`  ✗ ${name}: ${msg}`); };

@@ -1,13 +1,14 @@
 {
   "name": "mathsim",
   "productName": "Mathsim",
-  "version": "3.0.0",
-  "description": "Fractals, strange attractors, complex functions and more — renderer, maker and library with unlimited deep zoom",
+  "version": "4.0.0",
+  "description": "Mathsim — calculator, 2D/3D graphing, geometry, statistics, probability, matrices, practice, simulations and fractals",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "package": "electron-packager . Mathsim --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=^/dist --ignore=^/tools --ignore=^/node_modules --prune=false --app-copyright=\"Mathsim\""
+    "package": "electron-packager . Mathsim --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --ignore=^/dist --ignore=^/tools --ignore=^/node_modules --prune=false --app-copyright=\"Mathsim\"",
+    "test": "node tests/run.js"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",

@@ -572,7 +572,7 @@
   }
 
   Shell.register('stats', {
-    label: 'Statistics', key: 4, root: () => document.getElementById('mod-stats'), init,
+    label: 'Statistics', key: 6, order: 6, root: () => document.getElementById('mod-stats'), init,
     desc: 'Descriptive statistics, histograms and box plots, regression (linear to logistic), distributions and hypothesis tests.',
     features: ['Mean, median, σ', 'Regression & R²', 'Normal, t, χ², binomial…', 't-tests'],
   });

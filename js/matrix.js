@@ -398,7 +398,7 @@ const LinAlg = (() => {
   }
 
   Shell.register('matrix', {
-    label: 'Matrices', key: 5, root: () => document.getElementById('mod-matrix'), init,
+    label: 'Matrices', key: 8, order: 8, root: () => document.getElementById('mod-matrix'), init,
     desc: 'Matrix arithmetic, determinants, inverses, row reduction, eigenvalues and eigenvectors, and solving linear systems.',
     features: ['det & inverse', 'RREF & rank', 'Eigenvalues', 'Solve Ax = b'],
   });

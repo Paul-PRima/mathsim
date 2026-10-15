@@ -1,20 +1,28 @@
 # Mathsim
 
-A workbench for mathematics. Sections (switch with the rail on the left, or Ctrl+1 … Ctrl+7):
+A workbench for mathematics. Sections (switch with the rail on the left; Ctrl+1 … Ctrl+9 open the first nine):
 
-- **Calculator** — scientific calculator with history, degrees/radians, fractions and exact forms (3/4, 3π/4, √2/2),
-  variables (`a = 5`), your own functions (`f(x) = x^2 + 1`), equation solving (`2x + 3 = 11`), integrals, sums,
-  derivatives and 60+ functions.
-- **Graphing** — `y = f(x)`, `x = f(y)`, polar `r = f(θ)`, parametric `(x(t), y(t))`, implicit equations, inequalities
-  and points; sliders (with animation), tracing, roots / extrema / intersections, value tables, PNG export.
-- **Statistics** — descriptive statistics with histogram and box plot; regression (linear, polynomial, exponential,
-  power, logarithmic, logistic) with R² and residuals; distributions (normal, t, χ², F, exponential, uniform,
-  binomial, Poisson, geometric); t-tests and a proportion z-test.
-- **Matrices** — arithmetic, determinant, inverse, transpose, rank, trace, RREF, powers, eigenvalues and
-  eigenvectors, solving A·x = B; entries can be expressions and results can show as fractions.
-- **Algebra & tools** — equation solver, polynomial roots (complex too), symbolic derivatives with tangent line and
-  integrals, triangle solver, number facts (primality, factorization of big numbers, divisors, φ, σ), GCD/LCM with
-  Bézout, sequences & series, base converter, unit converter.
+- **Calculator** — scientific calculator with history, degrees/radians, variables (`a = 5`), your own functions
+  (`f(x) = x^2 + 1`), equation solving (`2x + 3 = 11`, complex roots when there are no real ones), integrals, sums,
+  derivatives and 60+ functions. **Exact arithmetic** (`30!`, `2^200`, `1/3 + 1/6 = 1/2`), **complex numbers**
+  (`sqrt(-4)`, `(2 + 3i)(1 − i)`, `e^(iπ)`) and **units** (`5 km/h in m/s`, `3 ft + 20 cm`, `100 °F in °C`).
+- **Graphing** — `y = f(x)`, `x = f(y)`, polar, parametric, implicit equations, inequalities and points; sliders,
+  tracing, roots / extrema / intersections, value tables; **slope fields** for `y' = f(x, y)` with click-to-draw
+  solutions; **areas** (`between(f, g)`, `int(f, x, a, b)`); PNG and **SVG export**; **share links**; **undo/redo**.
+- **3D graphs** — surfaces `z = f(x, y)` and parametric surfaces, colour by height, contour lines, rotate and zoom.
+- **Geometry** — GeoGebra-style constructions: points (also on lines and circles), segments, lines, rays, circles,
+  midpoints, perpendiculars, parallels, perpendicular bisectors, intersections, angles and polygons; drag points
+  and everything follows; lengths, angles and areas measured live; undo/redo.
+- **Statistics** — descriptive statistics with histogram and box plot; regression (six models) with R² and
+  residuals; nine probability distributions; t-tests and a proportion z-test.
+- **Probability lab** — dice sums, coin flips, a Galton board and Monte Carlo π, live next to the theory.
+- **Matrices** — arithmetic, determinant, inverse, rank, RREF, eigenvalues and eigenvectors, linear systems.
+- **Algebra & tools** — equation and polynomial solvers, symbolic derivatives, integrals, triangle solver, number
+  theory, GCD/LCM, sequences, base and unit converters.
+- **Practice** — endless generated exercises on 10 topics (English or German) with answer checking, scores and
+  worked solutions.
+- **Simulations** — Game of Life (six rules), 1D cellular automata, L-systems, Gray–Scott reaction–diffusion and
+  the Ulam prime spiral.
 - **Fractals** — escape-time fractals with unlimited deep zoom, complex functions (domain colouring), strange
   attractors and bifurcation diagrams, IFS flames, vector fractals, ray-marched 3D fractals, zoom videos.
 
@@ -33,6 +41,7 @@ Requires [Node.js](https://nodejs.org).
 npm install
 npm start          # run from source
 npm run package    # build dist/Mathsim-win32-x64/
+npm test           # run the automated tests (tests/*.test.js)
 ```
 
 ## How deep zoom works
@@ -57,6 +66,9 @@ newly exposed strips; zooming shows the previous image stretched until the new t
 | `js/shell.js` | Navigation rail, home page, switching sections |
 | `js/mathexpr.js` | Real-number expression engine (parser → JS), special functions, distributions, numeric calculus |
 | `js/calc.js`, `js/graph.js`, `js/stats.js`, `js/matrix.js`, `js/tools.js` | The math sections |
+| `js/calcx.js` | Exact (BigInt), complex and unit-aware evaluation for the calculator |
+| `js/surface.js`, `js/geometry.js`, `js/probability.js`, `js/practice.js`, `js/simulations.js` | 3D graphs, geometry, probability lab, practice, simulations |
+| `tests/` | Automated tests (`npm test`) |
 | `js/charts.js` | Small canvas chart helpers |
 | `js/symbolic.js` | Symbolic differentiation and simplification (tools page) |
 | `electron/main.js` | Desktop window |

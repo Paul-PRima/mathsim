@@ -360,7 +360,7 @@
   }
 
   Shell.register('calc', {
-    label: 'Calculator', key: 2, root: () => document.getElementById('mod-calc'), init,
+    label: 'Calculator', key: 2, order: 2, root: () => document.getElementById('mod-calc'), init,
     onShow: () => setTimeout(() => input && input.focus(), 0),
     desc: 'Scientific calculator with history, variables, your own functions, fractions, and an equation solver.',
     features: ['Degrees / radians', 'Solve 2x+3=11', 'f(x) = …', 'Integrals & sums'],
