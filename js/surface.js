@@ -394,5 +394,6 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
     onShow: () => requestDraw(),
     desc: 'Plot surfaces z = f(x, y) and parametric surfaces in 3D. Rotate, zoom, colour by height and contour lines.',
     features: ['z = f(x, y)', 'Parametric surfaces', 'Contours', 'Rotate & zoom'],
+    commands: EXAMPLES.map(([name], i) => ({ label: `3D: ${name}`, keywords: 'surface 3d example', run: () => { const s = document.querySelector('#mod-surface select'); if (s) { s.value = i; s.dispatchEvent(new Event('change')); } } })),
   });
 })();

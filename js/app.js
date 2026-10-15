@@ -1987,6 +1987,7 @@
     resize();
     loadDef(readHash() || Defs.BUILTINS[0], { activeId: readHash() ? null : 'b:' + Defs.BUILTINS[0].name, push: false });
     requestAnimationFrame(frame);
+    Shell.addCommands('fractals', Defs.BUILTINS.map((d) => ({ label: `Fractal: ${d.name}`, keywords: `fractal preset ${d.type || ''}`, run: () => loadDef(d, { activeId: 'b:' + d.name }) })));
   }
 
   init();

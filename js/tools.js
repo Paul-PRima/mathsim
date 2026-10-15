@@ -627,5 +627,15 @@
     label: 'Algebra & tools', short: 'Tools', key: 9, order: 9, root: () => document.getElementById('mod-tools'), init,
     desc: 'Equation and polynomial solvers, symbolic derivatives, integrals, triangle solver, prime factorization, base and unit converters.',
     features: ['Solve equations', 'Derivatives', 'Primes & factors', 'Units'],
+    commands: ['Equation solver', 'Polynomial roots', 'Derivatives & integrals', 'Triangle solver', 'Number facts', 'GCD & LCM', 'Base converter', 'Unit converter', 'Sequences & series'].map((title) => ({
+      label: title, keywords: 'tool card',
+      run: () => requestAnimationFrame(() => {
+        const c = [...document.querySelectorAll('#mod-tools .tool-card')].find((x) => x.textContent.includes(title));
+        if (!c) return;
+        c.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        const i = c.querySelector('input, textarea'); if (i) i.focus({ preventScroll: true });
+        c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 900);
+      }),
+    })),
   });
 })();

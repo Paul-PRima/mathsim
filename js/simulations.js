@@ -1100,6 +1100,11 @@ const Sims = (() => {
   }
 
   // ---------------------------------------------------------------- page
+  const SIM_KEYWORDS = {
+    life: 'conway cellular automaton', eca: 'rule 30 rule 110 wolfram', lsys: 'plant tree turtle', rd: 'turing gray scott', ulam: 'prime spiral',
+    pend: 'double pendulum chaos swing period', proj: 'throw ballistic trajectory parabola air resistance', orbit: 'kepler planet gravity ellipse',
+    epi: 'fourier draw circles dft', sort: 'bubble quicksort merge heap insertion selection', path: 'dijkstra a* astar bfs maze pathfinding',
+  };
   const TABS = { life: ['Game of Life', lifeTab, 'Patterns'], eca: ['1D automata', ecaTab, 'Patterns'], lsys: ['L-systems', lsysTab, 'Patterns'], rd: ['Reaction–diffusion', rdTab, 'Patterns'], ulam: ['Ulam spiral', ulamTab, 'Patterns'],
     pend: ['Pendulums', pendulumTab, 'Physics'], proj: ['Projectile', projectileTab, 'Physics'], orbit: ['Orbits', orbitTab, 'Physics'], epi: ['Fourier epicycles', epicycleTab, 'Physics'],
     sort: ['Sorting', sortTab, 'Algorithms'], path: ['Shortest paths', pathTab, 'Algorithms'] };
@@ -1168,7 +1173,7 @@ const Sims = (() => {
     onHide: () => { if (running) setRunning(false); },
     desc: 'Cellular automata, L-systems and Turing patterns; pendulums, projectiles and orbits; Fourier epicycles; sorting and path-finding algorithms.',
     features: ['Game of Life', 'Double pendulum', 'Fourier epicycles', 'Sorting & paths'],
-    commands: Object.entries(TABS).map(([k, [label, , g]]) => ({ label: `Simulation: ${label}`, keywords: `${g} ${k}`, run: () => { if (root) show(k); else st.tab = k; } })),
+    commands: Object.entries(TABS).map(([k, [label, , g]]) => ({ label: `Simulation: ${label}`, keywords: `${g} ${k} ${SIM_KEYWORDS[k] || ''}`, run: () => { if (root) show(k); else st.tab = k; } })),
   });
   window.Sims = Sims;
 })();

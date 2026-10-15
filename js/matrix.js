@@ -401,5 +401,7 @@ const LinAlg = (() => {
     label: 'Matrices', key: 8, order: 8, root: () => document.getElementById('mod-matrix'), init,
     desc: 'Matrix arithmetic, determinants, inverses, row reduction, eigenvalues and eigenvectors, and solving linear systems.',
     features: ['det & inverse', 'RREF & rank', 'Eigenvalues', 'Solve Ax = b'],
+    commands: [['Determinant of A', 'det'], ['Inverse of A', 'inv'], ['Eigenvalues and eigenvectors', 'eig'], ['Row reduce (RREF)', 'rref'], ['Solve A·x = B', 'solve'], ['Multiply A × B', 'mulAB']]
+      .map(([label, op]) => ({ label, keywords: 'matrix matrices ' + op, run: () => run(op) })),
   });
 })();

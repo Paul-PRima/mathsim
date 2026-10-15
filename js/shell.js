@@ -38,8 +38,15 @@ const Shell = (() => {
   const KEY = 'mathsim.module';
   const api = {}; // functions sections offer each other, e.g. api.graph.add(['y = x^2'])
 
+  const pendingCmds = {};
   function register(id, m) {
     mods.set(id, Object.assign({ id, icon: ICONS[id] || ICONS.tools, built: false, order: mods.size, commands: [] }, m));
+    if (pendingCmds[id]) mods.get(id).commands = mods.get(id).commands.concat(pendingCmds[id]);
+  }
+  // extra palette commands for a section (it may register later)
+  function addCommands(id, list) {
+    if (mods.has(id)) mods.get(id).commands = mods.get(id).commands.concat(list);
+    else pendingCmds[id] = (pendingCmds[id] || []).concat(list);
   }
   const ordered = () => [...mods.values()].sort((a, b) => a.order - b.order);
 
@@ -262,5 +269,5 @@ const Shell = (() => {
     open(mods.has(first) ? first : 'home');
   }
 
-  return { register, open, start, isActive, ICONS, api, settings, openPalette, openSettings, savePDF };
+  return { register, open, start, isActive, ICONS, api, settings, openPalette, openSettings, savePDF, addCommands };
 })();
