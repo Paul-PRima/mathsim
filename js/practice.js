@@ -214,15 +214,122 @@ const Practice = (() => {
       steps: [S(T(`Number of ways to choose which ${k} flips are heads: C(${n}, ${k}).`, `Anzahl der Möglichkeiten, welche ${k} Würfe Kopf sind: C(${n}, ${k}).`), `C(${n}, ${k}) = ${MX.S.nCr(n, k)}`), S(T(`Each sequence has probability 1/2^${n} = 1/${2 ** n}.`, `Jede Folge hat die Wahrscheinlichkeit 1/2^${n} = 1/${2 ** n}.`), `P = ${MX.S.nCr(n, k)}/${2 ** n} = ${frac(MX.S.nCr(n, k), 2 ** n)}`)] };
   };
 
+
+  // an expression F(x) whose derivative equals f (any constant C is fine)
+  const checkAntiderivative = (f) => (input) => {
+    let F;
+    try {
+      const src = String(input).replace(/^\s*F\(x\)\s*=\s*/i, '').replace(/\+\s*C\s*$/i, '');
+      MX.M.af = 1;
+      const c = MX.compile(MX.parse(src), ['x'], {});
+      if (c.free.size) return { ok: false, msg: T(`Unknown: ${[...c.free].join(', ')}`, `Unbekannt: ${[...c.free].join(', ')}`) };
+      F = c.fn;
+    } catch (e) { return { ok: false, msg: e.message }; }
+    const xs = [-1.3, -0.4, 0.7, 1.6, 2.2];
+    return { ok: xs.every((x) => close((F(x + 1e-4) - F(x - 1e-4)) / 2e-4, f(x), 1e-4 * Math.max(1, Math.abs(f(x))))) };
+  };
+  G.trig = (lv) => {
+    const kind = ri(0, lv === 0 ? 0 : lv === 1 ? 1 : 2);
+    if (kind === 0) {
+      const table = { 0: ['0', '1', '0'], 30: ['1/2', 'sqrt(3)/2', 'sqrt(3)/3'], 45: ['sqrt(2)/2', 'sqrt(2)/2', '1'], 60: ['sqrt(3)/2', '1/2', 'sqrt(3)'], 90: ['1', '0', null] };
+      let a, f;
+      do { a = pick([0, 30, 45, 60, 90]); f = ri(0, 2); } while (!table[a][f]);
+      const name = ['sin', 'cos', 'tan'][f], exact = table[a][f], val = [Math.sin, Math.cos, Math.tan][f]((a * Math.PI) / 180);
+      return { q: T(`Give the exact value (fractions and sqrt() are fine):`, `Gib den exakten Wert an (Brüche und sqrt() sind erlaubt):`), math: `${name}(${a}°)`, check: checkNum(Math.abs(val) < 1e-12 ? 0 : val), show: exact.replace(/sqrt\((\d)\)/g, '√$1'),
+        steps: [S(T(`Remember the special angles: in a 30-60-90 triangle the sides are 1, √3, 2; in a 45-45-90 triangle 1, 1, √2.`, `Merke die besonderen Winkel: im 30-60-90-Dreieck sind die Seiten 1, √3, 2; im 45-45-90-Dreieck 1, 1, √2.`), `${name}(${a}°) = ${exact.replace(/sqrt\((\d)\)/g, '√$1')}`)] };
+    }
+    if (kind === 1) {
+      const c = ri(5, 20), a = pick([20, 25, 30, 35, 40, 50, 55, 60, 70]), want = pick(['opp', 'adj']);
+      const v = want === 'opp' ? c * Math.sin((a * Math.PI) / 180) : c * Math.cos((a * Math.PI) / 180);
+      return { q: T(`A right triangle has hypotenuse ${c} cm and an angle of ${a}°. How long is the side ${want === 'opp' ? 'opposite' : 'next to (adjacent to)'} that angle? (2 decimals)`, `Ein rechtwinkliges Dreieck hat die Hypotenuse ${c} cm und einen Winkel von ${a}°. Wie lang ist die ${want === 'opp' ? 'Gegenkathete' : 'Ankathete'} dieses Winkels? (2 Nachkommastellen)`),
+        check: checkNum(v, 0.01), show: `${fm(+v.toFixed(2))} cm`,
+        steps: [S(want === 'opp' ? T('sin = opposite / hypotenuse, so opposite = hypotenuse · sin(angle).', 'sin = Gegenkathete / Hypotenuse, also Gegenkathete = Hypotenuse · sin(Winkel).') : T('cos = adjacent / hypotenuse, so adjacent = hypotenuse · cos(angle).', 'cos = Ankathete / Hypotenuse, also Ankathete = Hypotenuse · cos(Winkel).'),
+          `${c} · ${want === 'opp' ? 'sin' : 'cos'}(${a}°) ≈ ${fm(+v.toFixed(2))} cm`)] };
+    }
+    const o = ri(3, 12), adj = ri(3, 12), ang = (Math.atan(o / adj) * 180) / Math.PI;
+    return { q: T(`A right triangle has legs ${o} cm (opposite) and ${adj} cm (adjacent). What is the angle? (degrees, 1 decimal)`, `Ein rechtwinkliges Dreieck hat die Katheten ${o} cm (gegenüber) und ${adj} cm (anliegend). Wie groß ist der Winkel? (Grad, 1 Nachkommastelle)`),
+      check: checkNum(ang, 0.06), show: `${fm(+ang.toFixed(1))}°`,
+      steps: [S(T('tan = opposite / adjacent; take the inverse tangent.', 'tan = Gegenkathete / Ankathete; dann Arkustangens.'), `α = tan⁻¹(${o}/${adj}) ≈ ${fm(+ang.toFixed(1))}°`)] };
+  };
+  G.logs = (lv) => {
+    const kind = ri(0, lv === 0 ? 1 : 3);
+    const b = pick([2, 3, 5, 10]), k = ri(lv === 0 ? 1 : -2, lv === 0 ? 4 : 5);
+    if (kind === 0) return { q: T('Calculate:', 'Berechne:'), math: `log_${b}(${b ** k < 1 ? `1/${b ** -k}` : b ** k})`, check: checkNum(k), show: String(k),
+      steps: [S(T(`log_b(x) asks: b to which power gives x?`, `log_b(x) fragt: b hoch wie viel ergibt x?`), `${b}^${k} = ${b ** k < 1 ? `1/${b ** -k}` : b ** k}  ⇒  log_${b}(…) = ${k}`)] };
+    if (kind === 1) { const n = ri(1, 4); return { q: T('Calculate:', 'Berechne:'), math: `ln(e^${n})`, check: checkNum(n), show: String(n), steps: [S(T('ln and e^ undo each other.', 'ln und e^ heben sich auf.'), `ln(e^${n}) = ${n}`)] }; }
+    if (kind === 2) {
+      const m = ri(1, 4), n = ri(1, 4);
+      return { q: T('Calculate:', 'Berechne:'), math: `log_2(${2 ** m}) + log_2(${2 ** n})`, check: checkNum(m + n), show: String(m + n),
+        steps: [S(T('log rule: log(a) + log(b) = log(a·b).', 'Logarithmusgesetz: log(a) + log(b) = log(a·b).'), `log_2(${2 ** m} · ${2 ** n}) = log_2(${2 ** (m + n)}) = ${m + n}`)] };
+    }
+    const c = b ** Math.abs(k || 2);
+    return { q: T('Solve for x:', 'Löse nach x auf:'), math: `${b}^x = ${c}`, check: checkNum(Math.abs(k || 2)), show: `x = ${Math.abs(k || 2)}`,
+      steps: [S(T('Take the logarithm to base ' + b + '.', 'Logarithmus zur Basis ' + b + ' nehmen.'), `x = log_${b}(${c}) = ${Math.abs(k || 2)}`)] };
+  };
+  G.integrals = (lv) => {
+    if (lv === 0 || Math.random() < 0.5) {
+      const a = ri(0, 2), b = a + ri(1, 3), c = nz(1, 4), n = ri(1, 3);
+      const F = (x) => (c * x ** (n + 1)) / (n + 1), val = F(b) - F(a);
+      return { q: T('Calculate the definite integral:', 'Berechne das bestimmte Integral:'), math: `∫ from ${a} to ${b} of ${c === 1 ? '' : c}x${n === 1 ? '' : '^' + n} dx`, check: checkNum(val), show: Number.isInteger(val) ? String(val) : frac(Math.round(val * (n + 1)), n + 1),
+        steps: [S(T('Antiderivative by the power rule: xⁿ → xⁿ⁺¹/(n+1).', 'Stammfunktion mit der Potenzregel: xⁿ → xⁿ⁺¹/(n+1).'), `F(x) = ${c === 1 ? '' : c}x^${n + 1}/${n + 1}`),
+          S(T('Upper limit minus lower limit.', 'Obere Grenze minus untere Grenze.'), `F(${b}) − F(${a}) = ${fm(F(b))} − ${fm(F(a))} = ${fm(val)}`)] };
+    }
+    const pools = [
+      () => { const a = ri(1, 5), b = ri(1, 9); return [`${2 * a}x + ${b}`, (x) => 2 * a * x + b, `${a}x^2 + ${b}x + C`]; },
+      () => { const a = ri(1, 3); return [`${3 * a}x^2`, (x) => 3 * a * x * x, `${a}x^3 + C`]; },
+      () => [`cos(x)`, Math.cos, 'sin(x) + C'],
+      () => { const a = ri(2, 4); return [`e^(${a}x)`, (x) => Math.exp(a * x), `e^(${a}x)/${a} + C`]; },
+      () => [`1/x`, (x) => 1 / x, 'ln|x| + C'],
+    ];
+    const [fs, f, ans] = pick(pools)();
+    return { q: T('Find an antiderivative F(x):', 'Bestimme eine Stammfunktion F(x):'), math: `f(x) = ${fs}`, check: (input) => (/ln\s*\|?\s*x\s*\|?/i.test(input) && fs === '1/x' ? { ok: true } : checkAntiderivative(f)(input)), show: `F(x) = ${ans}`,
+      steps: [S(T('Reverse the derivative rules; check by differentiating the answer.', 'Ableitungsregeln umkehren; zur Probe die Antwort ableiten.'), `F(x) = ${ans}`)] };
+  };
+  G.vectors = (lv) => {
+    const v = () => [nz(-5, 5), nz(-5, 5), ...(lv === 2 ? [ri(-4, 4)] : [])];
+    const a = v(), b = v(), str = (u) => `(${u.join(', ')})`;
+    const kind = ri(0, lv === 0 ? 1 : 3);
+    const dot = a.reduce((s, x, i) => s + x * b[i], 0);
+    if (kind === 0) { const s = a.map((x, i) => x + b[i]); return { q: T('Add the vectors (answer as components separated by commas):', 'Addiere die Vektoren (Antwort: Komponenten durch Kommas getrennt):'), math: `${str(a)} + ${str(b)}`, show: s.join(', '), steps: [S(T('Add component by component.', 'Komponentenweise addieren.'), `${str(s)}`)],
+      check: (input) => { const n = readNumbers(input); return { ok: n.length === s.length && n.every((x, i) => close(x, s[i])), msg: n.length !== s.length ? T(`Give ${s.length} components.`, `Gib ${s.length} Komponenten an.`) : undefined }; } }; }
+    if (kind === 1) return { q: T('Calculate the dot product:', 'Berechne das Skalarprodukt:'), math: `${str(a)} · ${str(b)}`, check: checkNum(dot), show: String(dot), steps: [S(T('Multiply matching components and add.', 'Passende Komponenten multiplizieren und addieren.'), `${a.map((x, i) => `${x}·${b[i] < 0 ? `(${b[i]})` : b[i]}`).join(' + ')} = ${dot}`)] };
+    if (kind === 2) { const l = Math.hypot(...a); return { q: T('How long is the vector? (exact, e.g. sqrt(13), or 2 decimals)', 'Wie lang ist der Vektor? (exakt, z. B. sqrt(13), oder 2 Nachkommastellen)'), math: `|${str(a)}|`, check: (i) => checkNum(l, 0.006)(String(i).split('≈').pop()), show: Number.isInteger(l) ? String(l) : `√${a.reduce((s, x) => s + x * x, 0)} ≈ ${fm(+l.toFixed(2))}`, steps: [S(T('Length = √(sum of squared components).', 'Länge = √(Summe der Quadrate der Komponenten).'), `√(${a.map((x) => `${x}²`).join(' + ')}) = √${a.reduce((s, x) => s + x * x, 0)}`)] }; }
+    const ang = (Math.acos(dot / (Math.hypot(...a) * Math.hypot(...b))) * 180) / Math.PI;
+    return { q: T('What is the angle between the vectors? (degrees, 1 decimal)', 'Wie groß ist der Winkel zwischen den Vektoren? (Grad, 1 Nachkommastelle)'), math: `${str(a)}, ${str(b)}`, check: checkNum(ang, 0.06), show: `${fm(+ang.toFixed(1))}°`,
+      steps: [S(T('cos α = (a · b) / (|a| · |b|).', 'cos α = (a · b) / (|a| · |b|).'), `cos α = ${dot} / (${fm(+Math.hypot(...a).toFixed(4))} · ${fm(+Math.hypot(...b).toFixed(4))})  ⇒  α ≈ ${fm(+ang.toFixed(1))}°`)] };
+  };
+  G.word = () => {
+    const kinds = [
+      () => { const n1 = ri(3, 8), p = ri(2, 6) * 0.5, n2 = ri(9, 20), each = p / n1, res = each * n2;
+        return { q: T(`${n1} notebooks cost ${fm(p)} €. How much do ${n2} notebooks cost?`, `${n1} Hefte kosten ${fm(p)} €. Wie viel kosten ${n2} Hefte?`), check: checkNum(res, 0.006), show: `${fm(+res.toFixed(2))} €`,
+          steps: [S(T('Find the price of one notebook.', 'Preis für ein Heft berechnen.'), `${fm(p)} € : ${n1} = ${fm(+each.toFixed(4))} €`), S(T(`Multiply by ${n2}.`, `Mit ${n2} multiplizieren.`), `${fm(+each.toFixed(4))} € · ${n2} ≈ ${fm(+res.toFixed(2))} €`)] }; },
+      () => { const w = ri(2, 6), d = ri(6, 24), w2 = ri(2, 8); const res = (w * d) / w2;
+        return { q: T(`${w} painters need ${d} hours to paint a house. How long do ${w2} painters need (working at the same speed)?`, `${w} Maler brauchen ${d} Stunden für ein Haus. Wie lange brauchen ${w2} Maler (gleich schnell)?`), check: checkNum(res, 0.01), show: `${fm(+res.toFixed(2))} h`,
+          steps: [S(T('More painters, less time: the work w·d stays the same.', 'Mehr Maler, weniger Zeit: die Arbeit Maler · Stunden bleibt gleich.'), `${w} · ${d} = ${w * d} painter-hours`), S(T(`Divide by ${w2}.`, `Durch ${w2} teilen.`), `${w * d} : ${w2} = ${fm(+res.toFixed(2))} h`)] }; },
+      () => { const v = ri(4, 12) * 10, t = ri(2, 9) * 0.5, s = v * t;
+        return { q: T(`A train travels at ${v} km/h for ${fm(t)} hours. How far does it go?`, `Ein Zug fährt ${fm(t)} Stunden lang mit ${v} km/h. Wie weit kommt er?`), check: checkNum(s), show: `${fm(s)} km`, steps: [S(T('Distance = speed · time.', 'Strecke = Geschwindigkeit · Zeit.'), `${v} · ${fm(t)} = ${fm(s)} km`)] }; },
+      () => { const pr = ri(4, 30) * 10, p = pick([10, 15, 20, 25, 30]), res = pr * (1 - p / 100);
+        return { q: T(`A jacket costs ${pr} €. In the sale it is ${p}% cheaper. What is the sale price?`, `Eine Jacke kostet ${pr} €. Im Sale ist sie ${p} % billiger. Wie viel kostet sie jetzt?`), check: checkNum(res, 0.006), show: `${fm(res)} €`, steps: [S(T(`Pay ${100 - p}% of the price.`, `Man zahlt ${100 - p} % des Preises.`), `${pr} € · ${fm(1 - p / 100)} = ${fm(res)} €`)] }; },
+      () => { const age = ri(8, 15), k = ri(3, 4), yrs = ri(2, 6); const father = age * k;
+        return { q: T(`Ben is ${age}. His father is ${k} times as old. How old will his father be in ${yrs} years?`, `Ben ist ${age}. Sein Vater ist ${k}-mal so alt. Wie alt ist der Vater in ${yrs} Jahren?`), check: checkNum(father + yrs), show: String(father + yrs),
+          steps: [S(T("Father's age now.", 'Alter des Vaters jetzt.'), `${k} · ${age} = ${father}`), S(T(`Add ${yrs} years.`, `${yrs} Jahre addieren.`), `${father} + ${yrs} = ${father + yrs}`)] }; },
+      () => { const K = ri(5, 40) * 100, p = pick([2, 3, 4, 5]), n = ri(2, 5), Z = (K * p * n) / 100;
+        return { q: T(`${K} € earn ${p}% simple interest per year. How much interest after ${n} years?`, `${K} € werden ${n} Jahre lang zu ${p} % (ohne Zinseszins) verzinst. Wie viel Zinsen gibt es?`), check: checkNum(Z, 0.006), show: `${fm(Z)} €`, steps: [S(T('Interest = capital · rate · years.', 'Zinsen = Kapital · Zinssatz · Jahre.'), `${K} · ${p}/100 · ${n} = ${fm(Z)} €`)] }; },
+    ];
+    return pick(kinds)();
+  };
+
   const TOPICS = {
     arith: ['Order of operations', 'Rechenregeln'], fractions: ['Fractions', 'Brüche'], percent: ['Percentages', 'Prozente'], powers: ['Powers & roots', 'Potenzen & Wurzeln'],
     linear: ['Linear equations', 'Lineare Gleichungen'], quadratic: ['Quadratic equations', 'Quadratische Gleichungen'], system: ['Systems of equations', 'Gleichungssysteme'],
-    derivative: ['Derivatives', 'Ableitungen'], geometry: ['Geometry', 'Geometrie'], probability: ['Probability', 'Wahrscheinlichkeit'],
+    derivative: ['Derivatives', 'Ableitungen'], integrals: ['Integrals', 'Integrale'], trig: ['Trigonometry', 'Trigonometrie'], logs: ['Logarithms', 'Logarithmen'],
+    vectors: ['Vectors', 'Vektoren'], geometry: ['Geometry', 'Geometrie'], probability: ['Probability', 'Wahrscheinlichkeit'], word: ['Word problems', 'Textaufgaben'],
   };
   function generate(topic, level, language) {
     lang = language;
     const ex = G[topic](level);
     ex.lang = language;
+    ex.topic = topic;
     return ex;
   }
   return { generate, TOPICS, readNumbers, setLang: (l) => { lang = l; }, T: (en, de) => T(en, de) };
@@ -231,18 +338,31 @@ const Practice = (() => {
 (() => {
   const { el } = U;
   const KEY = 'mathsim.practice.v1';
-  const st = { topic: 'linear', level: 1, lang: 'en', stats: {} };
+  const st = { topic: 'linear', level: 1, lang: null, stats: {}, log: [] };
   let card, cur = null, tries = 0, solved = false, scoreEl, input, feedback, stepsEl;
   const T = (en, de) => (st.lang === 'de' ? de : en);
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* full */ } };
 
+  // review mode: topics you get wrong more often come up more often; untried topics count as average
+  function reviewTopic() {
+    const keys = Object.keys(Practice.TOPICS);
+    const w = keys.map((k) => { const s = st.stats[k]; return s && s.done ? 0.15 + (s.done - s.right + 1) / (s.done + 2) : 0.5; });
+    let r = Math.random() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < keys.length; i++) { r -= w[i]; if (r <= 0) return keys[i]; }
+    return keys[0];
+  }
   function next() {
-    cur = Practice.generate(st.topic, st.level, st.lang);
+    cur = Practice.generate(st.topic === 'review' ? reviewTopic() : st.topic, st.level, st.lang);
     tries = 0; solved = false;
     render();
     setTimeout(() => input && input.focus(), 0);
   }
-  function stat() { return st.stats[st.topic] || (st.stats[st.topic] = { done: 0, right: 0, streak: 0, best: 0 }); }
+  function stat() { const k = (cur && cur.topic) || st.topic; return st.stats[k] || (st.stats[k] = { done: 0, right: 0, streak: 0, best: 0 }); }
+  const today = () => new Date().toISOString().slice(0, 10);
+  function logResult(ok) {
+    st.log = (st.log || []).concat([{ d: today(), t: cur.topic, ok }]).slice(-3000);
+    renderProgress();
+  }
   function renderScore() {
     const s = stat();
     scoreEl.replaceChildren(
@@ -259,6 +379,7 @@ const Practice = (() => {
       solved = true;
       if (tries === 0) { s.right++; s.streak++; s.best = Math.max(s.best, s.streak); }
       s.done++;
+      logResult(tries === 0);
       feedback.className = 'pr-feedback ok';
       feedback.textContent = (r.msg || T('Correct!', 'Richtig!')) + (tries ? T(` (after ${tries + 1} tries)`, ` (nach ${tries + 1} Versuchen)`) : '');
       showSteps();
@@ -287,24 +408,95 @@ const Practice = (() => {
     stepsEl = el('div', { class: 'pr-steps', hidden: true });
     btnCheck = U.el('button', { type: 'button', class: 'primary', onclick: check }, T('Check', 'Prüfen'));
     card.replaceChildren(
+      st.topic === 'review' ? el('div', { class: 'pr-topic-tag' }, Practice.TOPICS[cur.topic][st.lang === 'de' ? 1 : 0]) : '',
       el('div', { class: 'pr-q' }, cur.q),
-      cur.math ? el('pre', { class: 'pr-math' }, cur.math) : null,
+      cur.math ? el('pre', { class: 'pr-math' }, cur.math) : '',
       el('div', { class: 'pr-answer-row' }, input, btnCheck,
-        U.el('button', { type: 'button', onclick: () => { if (!solved) { stat().streak = 0; stat().done++; solved = true; save(); renderScore(); btnCheck.textContent = T('Next exercise →', 'Nächste Aufgabe →'); } showSteps(); } }, T('Show solution', 'Lösung zeigen')),
+        U.el('button', { type: 'button', onclick: () => { if (!solved) { stat().streak = 0; stat().done++; solved = true; logResult(false); save(); renderScore(); btnCheck.textContent = T('Next exercise →', 'Nächste Aufgabe →'); } showSteps(); } }, T('Show solution', 'Lösung zeigen')),
         U.el('button', { type: 'button', onclick: next, title: T('Skip to a new exercise', 'Neue Aufgabe') }, T('New', 'Neu'))),
       feedback, stepsEl);
     renderScore();
   }
 
+  // ---- progress: the last 14 days and accuracy per topic
+  let progEl;
+  function renderProgress() {
+    if (!progEl) return;
+    const days = Array.from({ length: 14 }, (_, i) => new Date(Date.now() - (13 - i) * 864e5).toISOString().slice(0, 10));
+    const per = days.map((d) => { const e = (st.log || []).filter((x) => x.d === d); return [e.filter((x) => x.ok).length, e.filter((x) => !x.ok).length]; });
+    const max = Math.max(1, ...per.map(([a, b]) => a + b));
+    const bars = el('div', { class: 'pr-bars' }, days.map((d, i) => el('div', { class: 'pr-bar', title: `${d}: ${per[i][0]} ${T('right', 'richtig')}, ${per[i][1]} ${T('wrong', 'falsch')}` },
+      el('div', { class: 'pr-bar-stack' }, el('i', { class: 'bad', style: `height:${(per[i][1] / max) * 100}%` }), el('i', { class: 'ok', style: `height:${(per[i][0] / max) * 100}%` })),
+      el('span', {}, d.slice(8)))));
+    const topics = Object.entries(Practice.TOPICS).map(([k, [en, de]]) => {
+      const s = st.stats[k];
+      const acc = s && s.done ? s.right / s.done : null;
+      return el('div', { class: 'pr-acc' }, el('span', {}, st.lang === 'de' ? de : en),
+        el('div', { class: 'pr-acc-bar' }, el('i', { style: `width:${acc == null ? 0 : acc * 100}%; background:${acc == null ? 'transparent' : acc > 0.75 ? '#51cf66' : acc > 0.45 ? '#fcc419' : '#ff6b6b'}` })),
+        el('b', {}, acc == null ? '—' : `${Math.round(acc * 100)} % (${s.right}/${s.done})`));
+    });
+    progEl.replaceChildren(el('h4', {}, T('Last 14 days', 'Letzte 14 Tage')), bars, el('h4', {}, T('Right on the first try, per topic', 'Beim ersten Versuch richtig, je Thema')), el('div', { class: 'pr-accs' }, topics),
+      el('div', { class: 'btn-row' }, U.el('button', { type: 'button', class: 'small danger', onclick: () => { if (window.confirm(T('Reset all scores and history?', 'Alle Punkte und den Verlauf zurücksetzen?'))) { st.stats = {}; st.log = []; save(); renderProgress(); renderScore(); } } }, T('Reset progress', 'Fortschritt zurücksetzen'))));
+  }
+
+  // ---- worksheets: printable exercises with an answer key (PDF in the desktop app)
+  function worksheetDialog() {
+    const picks = new Set([st.topic === 'review' ? 'linear' : st.topic]);
+    const boxes = Object.entries(Practice.TOPICS).map(([k, [en, de]]) => {
+      const b = el('input', { type: 'checkbox' }); b.checked = picks.has(k);
+      b.addEventListener('change', () => (b.checked ? picks.add(k) : picks.delete(k)));
+      return el('label', { class: 'check' }, b, el('span', {}, st.lang === 'de' ? de : en));
+    });
+    const count = el('select', {}, [6, 10, 15, 20, 30].map((n) => el('option', { value: n }, String(n))));
+    count.value = 10;
+    const level = el('select', {}, [[0, T('Easy', 'Leicht')], [1, T('Medium', 'Mittel')], [2, T('Hard', 'Schwer')]].map(([v, l]) => el('option', { value: v }, l)));
+    level.value = st.level;
+    const key = el('input', { type: 'checkbox' }); key.checked = true;
+    const steps = el('input', { type: 'checkbox' }); steps.checked = false;
+    const back = el('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) back.remove(); } },
+      el('div', { class: 'modal wide' }, el('div', { class: 'modal-title' }, T('Worksheet', 'Arbeitsblatt')),
+        el('div', { class: 'pr-ws-topics' }, boxes),
+        el('div', { class: 'grid2' }, el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, T('Exercises', 'Aufgaben')), count), el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, T('Level', 'Niveau')), level)),
+        el('label', { class: 'check' }, key, el('span', {}, T('Answer key on a separate page', 'Lösungen auf einer eigenen Seite'))),
+        el('label', { class: 'check' }, steps, el('span', {}, T('Include worked solutions', 'Mit Lösungswegen'))),
+        el('div', { class: 'btn-row' }, el('button', { type: 'button', onclick: () => back.remove() }, T('Cancel', 'Abbrechen')),
+          el('button', { type: 'button', class: 'primary', onclick: () => {
+            if (!picks.size) return U.toast(T('Choose at least one topic', 'Wähle mindestens ein Thema'));
+            back.remove();
+            const list = [...picks];
+            const exs = Array.from({ length: +count.value }, (_, i) => Practice.generate(list[i % list.length], +level.value, st.lang));
+            Shell.savePDF(worksheetHTML(exs, key.checked, steps.checked), (st.lang === 'de' ? 'Arbeitsblatt' : 'Worksheet') + '.pdf');
+          } }, T('Create PDF', 'PDF erstellen')))));
+    document.body.append(back);
+  }
+  function worksheetHTML(exs, withKey, withSteps) {
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const date = new Date().toLocaleDateString(st.lang === 'de' ? 'de-DE' : 'en-GB');
+    const title = T('Mathematics worksheet', 'Mathematik-Arbeitsblatt');
+    const items = exs.map((e, i) => `<li><div class="q">${esc(e.q)}</div>${e.math ? `<pre>${esc(e.math)}</pre>` : ''}<div class="ans">${T('Answer', 'Antwort')}: ______________________</div></li>`).join('');
+    const keyHtml = withKey ? `<section class="key"><h2>${T('Answers', 'Lösungen')}</h2><ol>${exs.map((e) => `<li><b>${esc(e.show)}</b>${withSteps ? `<div class="steps">${e.steps.map((s) => `<div>${esc(s.text)}${s.math ? `<pre>${esc(s.math)}</pre>` : ''}</div>`).join('')}</div>` : ''}</li>`).join('')}</ol></section>` : '';
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
+      body { font: 12pt/1.45 "Segoe UI", system-ui, sans-serif; color: #111; margin: 0; }
+      header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 6px; margin-bottom: 14px; }
+      h1 { font-size: 17pt; margin: 0; } .meta { color: #555; font-size: 10pt; text-align: right; }
+      ol { padding-left: 22px; } li { margin: 0 0 14px; break-inside: avoid; }
+      pre { font: 13pt Consolas, monospace; margin: 4px 0; white-space: pre-wrap; }
+      .ans { color: #777; margin-top: 6px; } .key { break-before: page; } .steps { font-size: 10pt; color: #333; margin-top: 3px; } .steps pre { font-size: 10pt; }
+    </style></head><body><header><h1>${title}</h1><div class="meta">${T('Name', 'Name')}: ____________________<br>${date} · Mathsim</div></header><ol>${items}</ol>${keyHtml}</body></html>`;
+  }
+
   function init(root) {
     try { Object.assign(st, JSON.parse(localStorage.getItem(KEY)) || {}); } catch { /* fresh */ }
+    if (!st.lang) st.lang = Shell.settings.lang === 'de' ? 'de' : 'en'; // first visit: the app's language
     card = el('div', { class: 'pane pr-card' });
     scoreEl = el('div', { class: 'pr-score' });
     const topics = el('div', { class: 'pr-topics' });
     const levels = el('div', { class: 'seg pr-levels' });
     const langSeg = el('div', { class: 'seg pr-lang' });
     const paint = () => {
-      topics.replaceChildren(...Object.entries(Practice.TOPICS).map(([k, [en, de]]) => U.el('button', { type: 'button', class: 'chip' + (st.topic === k ? ' on' : ''), onclick: () => { st.topic = k; save(); paint(); next(); } }, st.lang === 'de' ? de : en)));
+      topics.replaceChildren(...Object.entries(Practice.TOPICS).map(([k, [en, de]]) => U.el('button', { type: 'button', class: 'chip' + (st.topic === k ? ' on' : ''), onclick: () => { st.topic = k; save(); paint(); next(); } }, st.lang === 'de' ? de : en)),
+        U.el('button', { type: 'button', class: 'chip pr-review' + (st.topic === 'review' ? ' on' : ''), title: T('Mixed exercises — more of the topics you find hard', 'Gemischte Aufgaben — mehr von den Themen, die dir schwerfallen'), onclick: () => { st.topic = 'review'; save(); paint(); next(); } }, T('★ Review weak topics', '★ Schwächen üben')));
+      renderProgress();
       levels.replaceChildren(...[T('Easy', 'Leicht'), T('Medium', 'Mittel'), T('Hard', 'Schwer')].map((l, i) => el('button', { type: 'button', class: st.level === i ? 'on' : '', onclick: () => { st.level = i; save(); paint(); next(); } }, l)));
       langSeg.replaceChildren(...[['en', 'English'], ['de', 'Deutsch']].map(([k, l]) => el('button', { type: 'button', class: st.lang === k ? 'on' : '', onclick: () => { st.lang = k; save(); paint(); next(); } }, l)));
     };
@@ -313,13 +505,22 @@ const Practice = (() => {
       el('div', { class: 'page-head' }, el('h2', {}, 'Practice'), el('p', {}, 'New exercises every time — answer, check, and see the worked solution. Works offline.')),
       el('div', { class: 'pane pr-setup' }, topics, el('div', { class: 'pr-setup-row' }, levels, langSeg, scoreEl)),
       card,
-      el('p', { class: 'hint' }, 'Answers can be numbers, fractions (3/4) or expressions; separate several answers with commas. Derivatives are checked by value, so any equivalent form counts.')));
+      el('div', { class: 'btn-row' }, U.el('button', { type: 'button', onclick: worksheetDialog }, '🖨 Worksheet / PDF…')),
+      el('details', { class: 'pane pr-progress' }, el('summary', {}, 'Progress'), progEl = el('div')),
+      el('p', { class: 'hint' }, 'Answers can be numbers, fractions (3/4) or expressions; separate several answers with commas. Derivatives and antiderivatives are checked by value, so any equivalent form counts.')));
+    renderProgress();
     next();
   }
 
+  const topicCmd = (k) => () => { st.topic = k; save(); document.querySelectorAll('#mod-practice .pr-topics .chip').forEach((b, i) => b.classList.toggle('on', Object.keys(Practice.TOPICS)[i] === k)); next(); };
   Shell.register('practice', {
+    commands: [
+      { label: 'Create a worksheet (PDF)', keywords: 'print worksheet pdf arbeitsblatt drucken', run: () => worksheetDialog() },
+      { label: 'Review weak topics', keywords: 'review mixed wiederholen', run: topicCmd('review') },
+      ...Object.entries(Practice.TOPICS).map(([k, [en, de]]) => ({ label: `Practise: ${en}`, keywords: de, run: topicCmd(k) })),
+    ],
     label: 'Practice', order: 10, root: () => document.getElementById('mod-practice'), init,
-    desc: 'Endless generated exercises on 10 topics with answer checking, scores and worked solutions — in English or German.',
-    features: ['Equations', 'Fractions & percent', 'Derivatives', 'Worked solutions'],
+    desc: 'Endless generated exercises on 15 topics with answer checking, progress, review of weak topics, worksheets and worked solutions — in English or German.',
+    features: ['15 topics', 'Worked solutions', 'Progress & review', 'Worksheets (PDF)'],
   });
 })();

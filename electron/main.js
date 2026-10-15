@@ -1,5 +1,5 @@
 // Desktop shell: opens index.html in a native window.
-const { app, BrowserWindow, Menu, shell, ipcMain, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, powerSaveBlocker, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -88,6 +88,25 @@ ipcMain.on('keep-awake', (e, on) => {
   if (on && blocker === null) blocker = powerSaveBlocker.start('prevent-app-suspension');
   if (!on && blocker !== null) { powerSaveBlocker.stop(blocker); blocker = null; }
 });
+// Worksheets and printouts: render the page's HTML in a hidden window, print it to an A4 PDF and save it.
+ipcMain.handle('save-pdf', async (e, html, name) => {
+  const owner = BrowserWindow.fromWebContents(e.sender);
+  const { canceled, filePath } = await dialog.showSaveDialog(owner, {
+    defaultPath: path.join(app.getPath('documents'), name.replace(/[\\/:*?"<>|]/g, '_')),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (canceled || !filePath) return null;
+  const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    const pdf = await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'default' } });
+    fs.writeFileSync(filePath, pdf);
+    return filePath;
+  } finally {
+    win.destroy();
+  }
+});
+
 ipcMain.on('task-done', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (win && !win.isFocused()) win.flashFrame(true);

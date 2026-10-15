@@ -137,7 +137,7 @@ const ProbLab = (() => {
       const R = st.galton.rows, top = 18, boardH = h * 0.5, binTop = top + boardH + 10, binH = h - binTop - 22;
       const dx = Math.min(36, (w - 40) / (R + 1)), cx = w / 2, dy = boardH / R;
       const pegX = (r, k) => cx + (k - r / 2) * dx;
-      ctx.fillStyle = '#5c6275';
+      ctx.fillStyle = Theme.muted;
       for (let r = 0; r < R; r++) for (let k = 0; k <= r; k++) { ctx.beginPath(); ctx.arc(pegX(r, k), top + r * dy, 2.6, 0, Math.PI * 2); ctx.fill(); }
       // balls in flight
       ctx.fillStyle = '#ffc078';
@@ -155,14 +155,14 @@ const ProbLab = (() => {
         const x = pegX(R, k), hh = (bins[k] / scale) * binH;
         ctx.fillStyle = 'rgba(77,171,247,0.7)';
         ctx.fillRect(x - dx * 0.42, binTop + binH - hh, dx * 0.84, hh);
-        ctx.strokeStyle = '#2a2f3c'; ctx.strokeRect(x - dx / 2, binTop, dx, binH);
+        ctx.strokeStyle = Theme.frame; ctx.strokeRect(x - dx / 2, binTop, dx, binH);
       }
       if (total) {
         ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2; ctx.beginPath();
         for (let k = 0; k <= R; k++) { const e = (MX.S.nCr(R, k) / 2 ** R) * total; const y = binTop + binH - (e / scale) * binH; k ? ctx.lineTo(pegX(R, k), y) : ctx.moveTo(pegX(R, k), y); }
         ctx.stroke();
       }
-      ctx.fillStyle = '#8a90a0'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = Theme.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center';
       for (let k = 0; k <= R; k++) ctx.fillText(String(k), pegX(R, k), binTop + binH + 14);
       const mean = total ? bins.reduce((s, c, k) => s + c * k, 0) / total : NaN;
       statsEl.replaceChildren(stat('balls landed', String(total)), stat('in flight', String(balls.length)), stat('average bin', total ? fmt(mean) : '—'), stat('expected', fmt(R / 2)), stat('std dev (theory)', fmt(Math.sqrt(R) / 2)));
@@ -194,7 +194,7 @@ const ProbLab = (() => {
     function draw() {
       const { ctx, w, h } = Charts.setup(sq);
       const s = Math.max(10, Math.min(w, h) - 20), ox = (w - s) / 2, oy = (h - s) / 2; // (tiny before the canvas is on screen)
-      ctx.strokeStyle = '#3d4353'; ctx.strokeRect(ox + 0.5, oy + 0.5, s, s);
+      ctx.strokeStyle = Theme.frame; ctx.strokeRect(ox + 0.5, oy + 0.5, s, s);
       ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ox, oy + s, s, -Math.PI / 2, 0); ctx.stroke();
       for (const [x, y, hit] of pts) { ctx.fillStyle = hit ? 'rgba(77,171,247,0.8)' : 'rgba(255,107,107,0.8)'; ctx.fillRect(ox + x * s - 1, oy + s - y * s - 1, 2, 2); }
       const est = n ? (4 * inside) / n : NaN;
@@ -263,6 +263,7 @@ const ProbLab = (() => {
         body)));
     show(st.tab);
     new ResizeObserver(() => active && active.draw()).observe(body);
+    Theme.onChange(() => active && active.draw());
   }
 
   Shell.register('probability', {

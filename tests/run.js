@@ -14,9 +14,9 @@ const ctx = vm.createContext({
   document: { getElementById: () => null, createElement: () => ({ getContext: () => null }) },
   window: {},
 });
-const MODULES = ['util.js', 'mathexpr.js', 'calcx.js', 'symbolic.js', 'matrix.js', 'charts.js'];
+const MODULES = ['util.js', 'mathexpr.js', 'calcx.js', 'symbolic.js', 'matrix.js', 'algebra.js', 'charts.js'];
 for (const f of MODULES) vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', f), 'utf8'), ctx, { filename: f });
-for (const name of ['U', 'MX', 'CalcX', 'Sym', 'LinAlg', 'Charts']) ctx[name] = vm.runInContext(name, ctx);
+for (const name of ['U', 'MX', 'CalcX', 'Sym', 'LinAlg', 'Algebra', 'Charts']) ctx[name] = vm.runInContext(name, ctx);
 // Optional modules (they register themselves on load and expose testable parts on window).
 for (const f of ['practice.js', 'simulations.js', 'probability.js', 'geometry.js', 'surface.js']) {
   const p = path.join(ROOT, 'js', f);

@@ -95,7 +95,7 @@
     const { ctx, X, Y } = fr;
     const wl = Math.min(...d.sorted.filter((v) => v >= d.q1 - 1.5 * d.iqr)), wh = Math.max(...d.sorted.filter((v) => v <= d.q3 + 1.5 * d.iqr));
     const yc = Y(0.5), hh = (Y(0) - Y(1)) * 0.28;
-    ctx.strokeStyle = '#e8eaf0';
+    ctx.strokeStyle = Theme.text;
     ctx.lineWidth = 1.5;
     ctx.fillStyle = 'rgba(204,93,232,0.35)';
     ctx.fillRect(X(d.q1), yc - hh, X(d.q3) - X(d.q1), 2 * hh);
@@ -158,7 +158,8 @@
           U.el('button', { type: 'button', class: 'small', onclick: () => sample('normal') }, 'Random normal'),
           U.el('button', { type: 'button', class: 'small', onclick: () => sample('skewed') }, 'Random skewed'),
           U.el('button', { type: 'button', class: 'small', onclick: () => sample('dice') }, 'Dice rolls'),
-          U.el('button', { type: 'button', class: 'small', onclick: () => { ta.value = ''; update(); } }, 'Clear')),
+          U.el('button', { type: 'button', class: 'small', onclick: () => { ta.value = ''; update(); } }, 'Clear'),
+          DataFile.button('Open file…', async (table) => { const cols = await DataFile.pickColumns(table, ['Column'], 'Which column?'); if (cols) { ta.value = DataFile.numbers(cols[0]).join(' '); update(); } })),
         el('p', { class: 'hint' }, 'Separate values with spaces, commas or new lines — or paste a column from a spreadsheet.')),
       el('div', { class: 'pane' },
         el('div', { class: 'st-charthead' }, el('h3', {}, 'Histogram'), el('label', { class: 'check inline' }, normC, el('span', {}, 'normal curve')), el('span', { class: 'st-bins' }, binsL, binsI)),
@@ -296,7 +297,7 @@
         drawPlot(xs, ys, F);
         const ext = Math.max(...res.map(Math.abs)) * 1.2 || 1;
         const fr = Charts.frame(resid, { xmin: Math.min(...xs), xmax: Math.max(...xs), ymin: -ext, ymax: ext, ylabel: 'residual' });
-        fr.ctx.strokeStyle = '#8a90a0'; fr.ctx.beginPath(); fr.ctx.moveTo(fr.x0, fr.Y(0)); fr.ctx.lineTo(fr.x1, fr.Y(0)); fr.ctx.stroke();
+        fr.ctx.strokeStyle = Theme.muted; fr.ctx.beginPath(); fr.ctx.moveTo(fr.x0, fr.Y(0)); fr.ctx.lineTo(fr.x1, fr.Y(0)); fr.ctx.stroke();
         fr.ctx.fillStyle = '#cc5de8';
         xs.forEach((x, i) => { fr.ctx.beginPath(); fr.ctx.arc(fr.X(x), fr.Y(res[i]), 3.5, 0, Math.PI * 2); fr.ctx.fill(); });
       });
@@ -320,6 +321,19 @@
     const view = el('div', { class: 'st-grid' },
       el('div', { class: 'pane' },
         el('h3', {}, 'Data (x, y per line)'), ta, msg,
+        el('div', { class: 'btn-row' },
+          DataFile.button('Open file…', async (table) => {
+            const cols = await DataFile.pickColumns(table, ['x', 'y'], 'Which columns are x and y?');
+            if (!cols) return;
+            const n = Math.min(cols[0].length, cols[1].length), lines = [];
+            for (let i = 0; i < n; i++) { const x = Number(String(cols[0][i]).replace(',', '.')), y = Number(String(cols[1][i]).replace(',', '.')); if (cols[0][i] !== '' && cols[1][i] !== '' && isFinite(x) && isFinite(y)) lines.push(`${x}, ${y}`); }
+            ta.value = lines.join('\n'); update();
+          }),
+          U.el('button', { type: 'button', class: 'small', title: 'Show the points and the fitted curve in Graphing', onclick: () => {
+            const { xs, ys } = parsePairs(ta.value);
+            if (!xs.length) return U.toast('No data yet');
+            Shell.api.graph.add(current ? [current.eq.replace(/·/g, '*')] : [], { table: { rows: xs.map((x, i) => [x, ys[i]]), fit: 'none' } });
+          } }, '📈 Open in Graphing')),
         el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, 'Model'), model), degRow,
         el('h3', {}, 'Predict'), pred, predOut,
         el('p', { class: 'hint' }, 'Paste two columns from a spreadsheet, or type pairs like “3, 7.5”.')),
@@ -442,7 +456,12 @@
   }
 
   // ---------------------------------------------------------------- hypothesis tests
-  const TESTS = { t1: 'One-sample t-test', t2: 'Two-sample t-test (Welch)', tp: 'Paired t-test', z1: 'One-proportion z-test' };
+  const TESTS = { t1: 'One-sample t-test', t2: 'Two-sample t-test (Welch)', tp: 'Paired t-test', z1: 'One-proportion z-test', chi_gof: 'Chi-square goodness of fit', chi_ind: 'Chi-square test of independence', anova: 'One-way ANOVA' };
+  const TEST_EXAMPLES = {
+    t1: ['12 15 11 18 14 16 13 15 19 22 14 15 17 13 16 15 12 21 14 16', ''], t2: ['12 15 11 18 14 16 13 15 19 22', '14 17 16 19 18 15 20 17 16 18 21 19'],
+    tp: ['72 80 65 90 77 84 69 75', '75 84 66 95 79 88 70 80'], z1: ['', ''],
+    chi_gof: ['18 22 16 25 19 20', ''], chi_ind: ['20 15 25\n30 25 15', ''], anova: ['23 25 21 27 24\n30 28 31 27 29\n22 20 24 21 23', ''],
+  };
   function testsTab() {
     const sel = el('select', {}, Object.entries(TESTS).map(([k, v]) => el('option', { value: k }, v)));
     sel.value = st.test;
@@ -455,6 +474,7 @@
     const px = el('input', { type: 'text', class: 'mono', value: st.px }), pn = el('input', { type: 'text', class: 'mono', value: st.pn }), p0 = el('input', { type: 'text', class: 'mono', value: st.p0 });
     const row = (l, i) => el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, l), i);
     const r1 = row('Sample 1', s1), r2 = row('Sample 2', s2), rmu = row('Hypothesised value (μ₀ or difference)', mu0);
+    const ralt = row('Alternative', alt);
     const rprop = el('div', { class: 'grid2' }, row('Successes x', px), row('Trials n', pn));
     const rp0 = row('Hypothesised proportion p₀', p0);
     const out = el('div');
@@ -463,8 +483,12 @@
       Object.assign(st, { test: sel.value, s1: s1.value, s2: s2.value, mu0: mu0.value, alt: alt.value, conf: conf.value, px: px.value, pn: pn.value, p0: p0.value });
       save();
       const t = sel.value;
-      r1.hidden = t === 'z1'; r2.hidden = t === 't1' || t === 'z1'; rmu.hidden = t === 'z1'; rprop.hidden = rp0.hidden = t !== 'z1';
-      r2.querySelector('.ctl-label').textContent = t === 'tp' ? 'Sample 2 (same order as sample 1)' : 'Sample 2';
+      const other = t === 'chi_gof' || t === 'chi_ind' || t === 'anova';
+      r1.hidden = t === 'z1'; r2.hidden = t === 't1' || t === 'z1' || t === 'chi_ind' || t === 'anova'; rmu.hidden = t === 'z1' || other; rprop.hidden = rp0.hidden = t !== 'z1';
+      ralt.hidden = other;
+      r1.querySelector('.ctl-label').textContent = { chi_gof: 'Observed counts', chi_ind: 'Table of counts (one row per line)', anova: 'Groups (one group per line)' }[t] || 'Sample 1';
+      r2.querySelector('.ctl-label').textContent = t === 'tp' ? 'Sample 2 (same order as sample 1)' : t === 'chi_gof' ? 'Expected proportions (leave empty for all equal)' : 'Sample 2';
+      if (other) return otherTest(t);
       let stat, df = null, se, est, label, distName, rowsOut;
       try {
         const cl = MX.evaluate(conf.value);
@@ -535,23 +559,155 @@
         });
       } catch (e) { out.replaceChildren(el('p', { class: 'err-text' }, e.message)); }
     }
+    // chi-square tests and ANOVA: statistic, df and p-value from the χ² or F distribution
+    function otherTest(t) {
+      try {
+        const cl = MX.evaluate(conf.value);
+        if (!(cl > 0 && cl < 1)) throw new Error('Confidence level must be between 0 and 1, e.g. 0.95');
+        let stat, df1, df2 = null, rowsOut, D, note = '';
+        if (t === 'chi_gof') {
+          const O = parseNums(s1.value).vals;
+          if (O.length < 2) throw new Error('Enter at least two observed counts');
+          let p = parseNums(s2.value).vals;
+          if (!p.length) p = O.map(() => 1);
+          if (p.length !== O.length) throw new Error(`Give ${O.length} expected proportions (one per count), or leave them empty`);
+          const N = O.reduce((a, b) => a + b, 0), ps = p.reduce((a, b) => a + b, 0);
+          const E = p.map((q) => (N * q) / ps);
+          stat = O.reduce((s, o, i) => s + (o - E[i]) ** 2 / E[i], 0);
+          df1 = O.length - 1; D = 'chi2';
+          rowsOut = [['Total N', N], ['Expected counts', E.map(f6).join(', ')]];
+          if (E.some((e) => e < 5)) note = 'Some expected counts are below 5, so the χ² approximation may be rough.';
+        } else if (t === 'chi_ind') {
+          const T = s1.value.split(/\n/).map((l) => parseNums(l).vals).filter((r) => r.length);
+          if (T.length < 2 || T.some((r) => r.length !== T[0].length) || T[0].length < 2) throw new Error('Enter a table of at least 2 × 2 counts, one row per line, rows of equal length');
+          const R = T.map((r) => r.reduce((a, b) => a + b, 0)), Cs = T[0].map((_, j) => T.reduce((s, r) => s + r[j], 0)), N = R.reduce((a, b) => a + b, 0);
+          stat = 0;
+          let low = false;
+          T.forEach((r, i) => r.forEach((o, j) => { const e = (R[i] * Cs[j]) / N; if (e < 5) low = true; stat += (o - e) ** 2 / e; }));
+          df1 = (T.length - 1) * (T[0].length - 1); D = 'chi2';
+          rowsOut = [['Table', `${T.length} rows × ${T[0].length} columns`], ['Total N', N], ['Row totals', R.join(', ')], ['Column totals', Cs.join(', ')]];
+          if (low) note = 'Some expected counts are below 5, so the χ² approximation may be rough.';
+        } else {
+          const groups = s1.value.split(/\n/).map((l) => parseNums(l).vals).filter((g) => g.length);
+          if (groups.length < 2 || groups.some((g) => g.length < 2)) throw new Error('Enter at least two groups (one per line) with at least two values each');
+          const all = groups.flat(), N = all.length, k = groups.length, m = all.reduce((a, b) => a + b, 0) / N;
+          const means = groups.map((g) => g.reduce((a, b) => a + b, 0) / g.length);
+          const ssb = groups.reduce((s, g, i) => s + g.length * (means[i] - m) ** 2, 0);
+          const ssw = groups.reduce((s, g, i) => s + g.reduce((a, x) => a + (x - means[i]) ** 2, 0), 0);
+          df1 = k - 1; df2 = N - k;
+          stat = ssb / df1 / (ssw / df2); D = 'f';
+          rowsOut = [['Groups', k], ['Group means', means.map(f6).join(', ')], ['Grand mean', m], ['Between-groups SS', ssb], ['Within-groups SS', ssw]];
+        }
+        const Dist = MX.DIST[D], P = D === 'chi2' ? { k: df1 } : { d1: df1, d2: df2 };
+        const pval = 1 - Dist.cdf(stat, P);
+        const sig = pval < 1 - cl;
+        out.replaceChildren(
+          el('div', { class: 'st-big mono' }, `${D === 'chi2' ? 'χ²' : 'F'} = ${f6(stat)},  df = ${df1}${df2 != null ? `, ${df2}` : ''},  p = ${f6(pval)}`),
+          el('p', { class: 'st-verdict ' + (sig ? 'yes' : 'no') }, sig
+            ? `Significant at the ${f6((1 - cl) * 100)}% level: reject the null hypothesis.`
+            : `Not significant at the ${f6((1 - cl) * 100)}% level: the data are consistent with the null hypothesis.`),
+          kv(rowsOut), note ? el('p', { class: 'hint' }, note) : '');
+        requestAnimationFrame(() => {
+          const [lo, hi0] = Dist.range(P), hi = Math.max(hi0, stat * 1.2);
+          let ymax = 0;
+          for (let i = 1; i <= 200; i++) { const y = Dist.pdf(lo + ((hi - lo) * i) / 200, P); if (isFinite(y)) ymax = Math.max(ymax, y); }
+          const fr = Charts.frame(cv, { xmin: lo, xmax: hi, ymin: 0, ymax: Math.min(ymax, 5) * 1.15 || 1, ylabel: 'density' });
+          const { ctx, X, Y } = fr;
+          ctx.fillStyle = 'rgba(255,107,107,0.45)'; ctx.beginPath(); ctx.moveTo(X(stat), Y(0));
+          for (let i = 0; i <= 100; i++) { const x = stat + ((hi - stat) * i) / 100; ctx.lineTo(X(x), Y(Math.min(ymax * 1.2, Dist.pdf(x, P)))); }
+          ctx.lineTo(X(hi), Y(0)); ctx.fill();
+          Charts.curve(fr, (x) => Math.min(ymax * 1.2, Dist.pdf(x, P)), lo, hi, '#4dabf7', 2);
+          ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(stat), fr.y0); ctx.lineTo(X(stat), fr.y1); ctx.stroke();
+        });
+      } catch (e) { out.replaceChildren(el('p', { class: 'err-text' }, e.message)); }
+    }
+    const exampleBtn = U.el('button', { type: 'button', class: 'small', onclick: () => { const ex = TEST_EXAMPLES[sel.value]; if (ex) { s1.value = ex[0]; s2.value = ex[1]; update(); } } }, 'Example data');
+    const fileBtn = DataFile.button('Open file…', async (table) => {
+      const t = sel.value;
+      const many = t === 'chi_ind' || t === 'anova';
+      const cols = await DataFile.pickColumns(table, many ? 'many' : t === 't2' || t === 'tp' ? ['Sample 1', 'Sample 2'] : ['Column'], many ? (t === 'anova' ? 'Columns = groups' : 'Columns of the table') : 'Which column?');
+      if (!cols) return;
+      const nums = cols.map(DataFile.numbers);
+      if (t === 'chi_ind') { const n = Math.min(...nums.map((c) => c.length)); s1.value = Array.from({ length: n }, (_, i) => nums.map((c) => c[i]).join(' ')).join('\n'); }
+      else if (t === 'anova') s1.value = nums.map((c) => c.join(' ')).join('\n');
+      else { s1.value = nums[0].join(' '); if (nums[1]) s2.value = nums[1].join(' '); }
+      update();
+    });
     [sel, alt].forEach((x) => x.addEventListener('change', update));
     [s1, s2, mu0, conf, px, pn, p0].forEach((x) => x.addEventListener('input', update));
     const view = el('div', { class: 'st-grid' },
       el('div', { class: 'pane' },
         el('h3', {}, 'Test'), el('label', { class: 'ctl' }, sel),
+        el('div', { class: 'btn-row' }, exampleBtn, fileBtn),
         r1, r2, rmu, rprop, rp0,
-        el('div', { class: 'grid2' }, row('Alternative', alt), row('Confidence level', conf))),
+        el('div', { class: 'grid2' }, ralt, row('Confidence level', conf))),
       el('div', { class: 'pane' }, el('h3', {}, 'Result'), out, cv,
         el('p', { class: 'hint' }, 'The shaded area is the p-value: the chance of a result at least this extreme if the null hypothesis were true.')));
     update();
     return { view, update };
   }
 
+  // ---------------------------------------------------------------- confidence intervals: what “95 %” means
+  function ciTab() {
+    const inp = (v) => el('input', { type: 'text', class: 'mono', value: v });
+    const mu = inp('50'), sigma = inp('10'), nIn = inp('20'), confIn = inp('0.95');
+    const row = (l, i) => el('label', { class: 'ctl' }, el('span', { class: 'ctl-label' }, l), i);
+    const cv = el('canvas', { class: 'chart tall' }), out = el('div');
+    let iv = [];
+    const gauss = () => { let u = 0; while (!u) u = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random()); };
+    const params = () => { const p = { mu: MX.evaluate(mu.value), sigma: MX.evaluate(sigma.value), n: Math.round(MX.evaluate(nIn.value)), cl: MX.evaluate(confIn.value) }; if (!(p.sigma > 0 && p.n >= 2 && p.cl > 0 && p.cl < 1)) throw new Error('Need σ > 0, n ≥ 2 and a confidence level between 0 and 1'); return p; };
+    function sample(k) {
+      const p = params();
+      const tcrit = MX.quantile(MX.DIST.t, 1 - (1 - p.cl) / 2, { nu: p.n - 1 });
+      for (let j = 0; j < k; j++) {
+        const xs = Array.from({ length: p.n }, () => p.mu + p.sigma * gauss());
+        const m = xs.reduce((a, b) => a + b, 0) / p.n, s = Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (p.n - 1));
+        const h = (tcrit * s) / Math.sqrt(p.n);
+        iv.push({ m, lo: m - h, hi: m + h, hit: m - h <= p.mu && p.mu <= m + h });
+      }
+      if (iv.length > 20000) iv = iv.slice(-20000);
+      update();
+    }
+    function update() {
+      let p;
+      try { p = params(); } catch (e) { out.replaceChildren(el('p', { class: 'err-text' }, e.message)); return; }
+      const hits = iv.filter((x) => x.hit).length;
+      out.replaceChildren(el('div', { class: 'st-big mono' }, iv.length ? `${hits} of ${iv.length} intervals contain μ  (${f6((100 * hits) / iv.length)} %)` : 'Draw some samples'),
+        el('p', { class: 'hint' }, `Each line is a ${f6(p.cl * 100)}% t-interval from one random sample of n = ${p.n}. In the long run about ${f6(p.cl * 100)}% of them catch the true mean μ = ${f6(p.mu)} — that is what the confidence level means. Red lines miss it.`));
+      requestAnimationFrame(() => {
+        const show = iv.slice(-100);
+        const w = Math.max(...show.map((x) => Math.max(Math.abs(x.lo - p.mu), Math.abs(x.hi - p.mu))), p.sigma) * 1.1;
+        const fr = Charts.frame(cv, { xmin: p.mu - w, xmax: p.mu + w, ymin: 0, ymax: 101, xticks: true });
+        const { ctx, X, Y } = fr;
+        ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(p.mu), fr.y0); ctx.lineTo(X(p.mu), fr.y1); ctx.stroke();
+        show.forEach((x, i) => {
+          ctx.strokeStyle = x.hit ? 'rgba(77,171,247,0.85)' : '#ff6b6b'; ctx.lineWidth = x.hit ? 1.5 : 2.2;
+          const y = Y(100 - i);
+          ctx.beginPath(); ctx.moveTo(X(x.lo), y); ctx.lineTo(X(x.hi), y); ctx.stroke();
+          ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(X(x.m) - 1.5, y - 1.5, 3, 3);
+        });
+      });
+    }
+    [mu, sigma, nIn, confIn].forEach((i) => i.addEventListener('input', () => { iv = []; update(); }));
+    const view = el('div', { class: 'st-grid' },
+      el('div', { class: 'pane' }, el('h3', {}, 'Population and samples'),
+        el('div', { class: 'grid2' }, row('Population mean μ', mu), row('Population std dev σ', sigma)),
+        el('div', { class: 'grid2' }, row('Sample size n', nIn), row('Confidence level', confIn)),
+        el('div', { class: 'btn-row' },
+          U.el('button', { type: 'button', class: 'primary', onclick: () => sample(1) }, '+1 sample'),
+          U.el('button', { type: 'button', onclick: () => sample(100) }, '+100 samples'),
+          U.el('button', { type: 'button', onclick: () => sample(1000) }, '+1000'),
+          U.el('button', { type: 'button', onclick: () => { iv = []; update(); } }, 'Clear'))),
+      el('div', { class: 'pane' }, el('h3', {}, 'The last 100 intervals'), out, cv));
+    sample(30);
+    return { view, update };
+  }
+
   // ---------------------------------------------------------------- page
+  let showTab = null;
   function init(root) {
     load();
-    const tabs = { one: ['One variable', oneVarTab], two: ['Regression', twoVarTab], dist: ['Distributions', distTab], test: ['Hypothesis tests', testsTab] };
+    const tabs = { one: ['One variable', oneVarTab], two: ['Regression', twoVarTab], dist: ['Distributions', distTab], test: ['Hypothesis tests', testsTab], ci: ['Confidence intervals', ciTab] };
     const built = {};
     const body = el('div');
     const seg = el('div', { class: 'seg page-tabs' });
@@ -566,14 +722,24 @@
     root.append(el('div', { class: 'page' },
       el('div', { class: 'page-head' }, el('h2', {}, 'Statistics'), el('p', {}, 'Describe data, fit models, work out probabilities and run significance tests.')),
       seg, body));
+    showTab = (k, after) => { show(k); if (after) after(); };
     show(tabs[st.tab] ? st.tab : 'one');
     let rt = 0;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => built[st.tab] && built[st.tab].update(), 100); }).observe(body);
+    Theme.onChange(() => built[st.tab] && built[st.tab].update());
   }
 
+  const testCmd = (k) => () => showTab('test', () => { st.test = k; const s = document.querySelector('#mod-stats .st-grid select'); if (s) { s.value = k; s.dispatchEvent(new Event('change')); } });
   Shell.register('stats', {
+    commands: [
+      { label: 'Descriptive statistics (mean, median, standard deviation)', keywords: 'mean median mode quartile histogram box plot mittelwert', run: () => showTab('one') },
+      { label: 'Regression / curve fitting', keywords: 'regression fit least squares correlation r2', run: () => showTab('two') },
+      { label: 'Probability distributions', keywords: 'normal binomial poisson t chi distribution verteilung', run: () => showTab('dist') },
+      { label: 'Confidence interval demo', keywords: 'confidence interval coverage konfidenzintervall', run: () => showTab('ci') },
+      ...Object.entries(TESTS).map(([k, v]) => ({ label: v, keywords: 'hypothesis test p-value significance', run: testCmd(k) })),
+    ],
     label: 'Statistics', key: 6, order: 6, root: () => document.getElementById('mod-stats'), init,
     desc: 'Descriptive statistics, histograms and box plots, regression (linear to logistic), distributions and hypothesis tests.',
-    features: ['Mean, median, σ', 'Regression & R²', 'Normal, t, χ², binomial…', 't-tests'],
+    features: ['Mean, median, σ', 'Regression & R²', 'CSV & Excel files', 'χ², ANOVA, t-tests'],
   });
 })();

@@ -23,7 +23,7 @@
     } catch { /* fresh */ }
     loadExample(EXAMPLES[0], false);
   }
-  const FIELDS = ['text', 'color', 'hidden', 'min', 'max', 'step', 'tmin', 'tmax', 'showTable', 'tx0', 'tdx', 'ics'];
+  const FIELDS = ['text', 'color', 'hidden', 'min', 'max', 'step', 'tmin', 'tmax', 'showTable', 'tx0', 'tdx', 'ics', 'type', 'rows', 'fit'];
   const snapshot = () => S.items.map((it) => Object.fromEntries(FIELDS.map((k) => [k, it[k]])));
   const fromSnapshot = (list) => list.map((it) => Object.assign(newItem(''), it, { id: nextId++ }));
   const save = U.debounce(() => {
@@ -104,6 +104,7 @@
     const defs = [];
     for (const it of S.items) {
       it.kind = null; it.err = null; it.ast = null; it.fns = null; it.missing = []; it.value = null;
+      if (it.type === 'table') { compileTable(it); continue; }
       if (!it.text.trim()) continue;
       const ode = /^\s*(?:y'|y′|dy\s*\/\s*dx)\s*=\s*(.+)$/i.exec(it.text);
       if (ode) {
@@ -157,6 +158,52 @@
     }
     for (const it of S.items) if (it.kind === 'ode' && !it.err) {
       try { it.fns = { slope: comp(it.ast, ['x', 'y'], it) }; } catch (e) { it.err = e.message; }
+    }
+  }
+
+  // ---------------------------------------------------------------- tables of points, with an optional fitted curve
+  const FITS = { none: 'no curve', linear: 'line y = ax + b', quadratic: 'parabola', cubic: 'cubic', exponential: 'exponential y = a·e^(bx)', power: 'power y = a·x^b', log: 'logarithmic y = a + b·ln x' };
+  const num = (s) => { const t = String(s).trim().replace(',', '.'); if (t === '') return NaN; const v = Number(t); if (isFinite(v)) return v; try { return MX.evaluate(t); } catch { return NaN; } };
+  function polyFit(xs, ys, deg) {
+    const A = Array.from({ length: deg + 1 }, (_, i) => Array.from({ length: deg + 1 }, (_, j) => xs.reduce((s, x) => s + x ** (i + j), 0)));
+    const b = Array.from({ length: deg + 1 }, (_, i) => [xs.reduce((s, x, k) => s + x ** i * ys[k], 0)]);
+    return LinAlg.solve(A, b).X.map((r) => r[0]);
+  }
+  function fitData(pts, kind) {
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const f6 = (v) => MX.fmt(+v.toPrecision(5));
+    const sgn = (v) => (v < 0 ? ` − ${f6(-v)}` : ` + ${f6(v)}`);
+    let f, text;
+    if (kind === 'linear' || kind === 'quadratic' || kind === 'cubic') {
+      const deg = { linear: 1, quadratic: 2, cubic: 3 }[kind];
+      if (pts.length <= deg) throw new Error(`Needs at least ${deg + 1} points`);
+      const c = polyFit(xs, ys, deg);
+      f = (x) => c.reduce((s, a, i) => s + a * x ** i, 0);
+      text = 'y = ' + c.map((a, i) => [a, i]).reverse().map(([a, i], k) => (k ? sgn(a) : f6(a)) + (i === 0 ? '' : i === 1 ? 'x' : `x^${i}`)).join('');
+    } else if (kind === 'exponential') {
+      if (ys.some((y) => y <= 0)) throw new Error('Exponential fits need every y > 0');
+      const [a0, b] = polyFit(xs, ys.map(Math.log), 1), a = Math.exp(a0);
+      f = (x) => a * Math.exp(b * x); text = `y = ${f6(a)}·e^(${f6(b)}x)`;
+    } else if (kind === 'power') {
+      if (xs.some((x) => x <= 0) || ys.some((y) => y <= 0)) throw new Error('Power fits need x > 0 and y > 0');
+      const [a0, b] = polyFit(xs.map(Math.log), ys.map(Math.log), 1), a = Math.exp(a0);
+      f = (x) => a * x ** b; text = `y = ${f6(a)}·x^${f6(b)}`;
+    } else {
+      if (xs.some((x) => x <= 0)) throw new Error('Logarithmic fits need every x > 0');
+      const [a, b] = polyFit(xs.map(Math.log), ys, 1);
+      f = (x) => a + b * Math.log(x); text = `y = ${f6(a)}${sgn(b)}·ln x`;
+    }
+    const my = ys.reduce((s, y) => s + y, 0) / ys.length;
+    const ssr = ys.reduce((s, y, i) => s + (y - f(xs[i])) ** 2, 0), sst = ys.reduce((s, y) => s + (y - my) ** 2, 0);
+    return { f, text: `${text}   ·   R² = ${sst ? MX.fmt(+(1 - ssr / sst).toPrecision(5)) : '1'}` };
+  }
+  function compileTable(it) {
+    it.kind = 'table';
+    const pts = (it.rows || []).map(([x, y]) => [num(x), num(y)]).filter(([x, y]) => isFinite(x) && isFinite(y));
+    it.fns = { pts };
+    it.fitText = '';
+    if (it.fit && it.fit !== 'none' && pts.length) {
+      try { const r = fitData(pts, it.fit); it.fns.fx = r.f; it.fitText = r.text; } catch (e) { it.err = e.message; }
     }
   }
 
@@ -259,11 +306,11 @@
       for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) { const p = Math.round(toPy(v)) + 0.5; ctx.moveTo(0, p); ctx.lineTo(W, p); }
       ctx.stroke();
     };
-    lines(minor, 'rgba(255,255,255,0.035)');
-    lines(major, 'rgba(255,255,255,0.09)');
+    lines(minor, Theme.grid);
+    lines(major, Theme.gridMajor);
     // axes
     const ax = toPx(0), ay = toPy(0);
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.strokeStyle = Theme.axis;
     ctx.lineWidth = 1.3;
     ctx.beginPath();
     if (ax >= 0 && ax <= W) { ctx.moveTo(ax, 0); ctx.lineTo(ax, H); }
@@ -271,7 +318,7 @@
     ctx.stroke();
     // labels, kept on screen when an axis is off to the side
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(232,234,240,0.7)';
+    ctx.fillStyle = Theme.label;
     const ly = U.clamp(ay + 4, 4, H - 16), lx = U.clamp(ax - 6, 30, W - 4);
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     for (let v = Math.ceil(x0 / major) * major; v <= x1; v += major) {
@@ -460,18 +507,18 @@
   function dot(x, y, color, r = 5, hollow = false) {
     ctx.beginPath();
     ctx.arc(toPx(x), toPy(y), r, 0, Math.PI * 2);
-    if (hollow) { ctx.fillStyle = '#0c0e13'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke(); }
+    if (hollow) { ctx.fillStyle = Theme.bg; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke(); }
     else { ctx.fillStyle = color; ctx.fill(); }
   }
 
-  function label(x, y, text, color = '#e8eaf0') {
+  function label(x, y, text, color = Theme.text) {
     ctx.font = '12px ui-monospace, Consolas, monospace';
     const w = ctx.measureText(text).width + 12;
     let px = toPx(x) + 10, py = toPy(y) - 26;
     if (px + w > W - 4) px = toPx(x) - w - 10;
     if (py < 4) py = toPy(y) + 10;
-    ctx.fillStyle = 'rgba(16,18,24,0.92)';
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillStyle = Theme.panel;
+    ctx.strokeStyle = Theme.frame;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect ? ctx.roundRect(px, py, w, 20, 5) : ctx.rect(px, py, w, 20);
@@ -494,7 +541,7 @@
 
   // Everything on the graph, drawn through `ctx` (a canvas, or the SVG recorder for export).
   function drawScene() {
-    ctx.fillStyle = '#0c0e13';
+    ctx.fillStyle = Theme.bg;
     ctx.fillRect(0, 0, W, H);
     MX.M.af = 1;
     drawGrid();
@@ -524,14 +571,15 @@
       else if (f.pr) plotCurve((t) => { const r = f.pr(t); return [r * Math.cos(t), r * Math.sin(t)]; }, it.tmin, it.tmax, it.color);
       else if (f.px) plotCurve((t) => [f.px(t), f.py(t)], it.tmin, it.tmax, it.color);
     }
+    for (const it of vis) if (it.fns.pts) for (const [x, y] of it.fns.pts) dot(x, y, it.color, 4.5);
     for (const it of vis) if (it.fns.pt) {
       const [x, y] = it.fns.pt();
       if (isFinite(x) && isFinite(y)) { dot(x, y, it.color, 5); label(x, y, pt(x, y), it.color); }
     }
     // points of interest of the selected curve
-    for (const p of pois) dot(p.x, p.y, '#b0b5c3', 4, true);
-    for (const p of S.pins) { dot(p.x, p.y, '#e8eaf0', 4); label(p.x, p.y, `${p.what} ${pt(p.x, p.y)}`); }
-    if (S.hoverPoi) { dot(S.hoverPoi.x, S.hoverPoi.y, '#e8eaf0', 5); label(S.hoverPoi.x, S.hoverPoi.y, `${S.hoverPoi.what} ${pt(S.hoverPoi.x, S.hoverPoi.y)}`); }
+    for (const p of pois) dot(p.x, p.y, Theme.muted, 4, true);
+    for (const p of S.pins) { dot(p.x, p.y, Theme.text, 4); label(p.x, p.y, `${p.what} ${pt(p.x, p.y)}`); }
+    if (S.hoverPoi) { dot(S.hoverPoi.x, S.hoverPoi.y, Theme.text, 5); label(S.hoverPoi.x, S.hoverPoi.y, `${S.hoverPoi.what} ${pt(S.hoverPoi.x, S.hoverPoi.y)}`); }
     else if (S.trace) { dot(S.trace.x, S.trace.y, S.trace.color, 5); label(S.trace.x, S.trace.y, pt(S.trace.x, S.trace.y), S.trace.color); }
   }
 
@@ -720,6 +768,12 @@
   function updateInfo(it) {
     const row = listEl.querySelector(`.gx-item[data-id="${it.id}"]`);
     if (!row) return;
+    if (it.type === 'table') {
+      const info = row.querySelector('.gx-tinfo');
+      info.textContent = it.err || (it.fitText ? it.fitText : `${it.fns ? it.fns.pts.length : 0} points`);
+      info.className = 'gx-info gx-tinfo' + (it.err ? ' err-text' : '');
+      return;
+    }
     const info = row.querySelector('.gx-info');
     const kids = [];
     if (it.err) kids.push(el('span', { class: 'err-text' }, it.err));
@@ -857,8 +911,64 @@
       el('div', { class: 'gx-table' }));
   }
 
+  function tableRow(it) {
+    if (!Array.isArray(it.rows)) it.rows = [['', '']];
+    const body = el('div', { class: 'gt-rows' });
+    const paint = () => {
+      body.replaceChildren(el('div', { class: 'gt-head' }, el('span', {}, 'x'), el('span', {}, 'y'), el('span')),
+        ...it.rows.map((r, i) => {
+          const cell = (j) => {
+            const inp = el('input', { type: 'text', class: 'mono gt-cell', value: r[j] ?? '' });
+            inp.addEventListener('input', () => { r[j] = inp.value; refresh(); });
+            inp.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey && j === 1 && i === it.rows.length - 1)) {
+                e.preventDefault();
+                if (i === it.rows.length - 1) { it.rows.push(['', '']); paint(); }
+                body.querySelectorAll('.gt-cell')[(i + 1) * 2 + (e.key === 'Enter' ? j : 0)].focus();
+              }
+            });
+            return inp;
+          };
+          return el('div', { class: 'gt-row' }, cell(0), cell(1), U.el('button', { type: 'button', class: 'icon danger', title: 'Remove row', onclick: () => { it.rows.splice(i, 1); if (!it.rows.length) it.rows.push(['', '']); paint(); refresh(); } }, '×'));
+        }));
+    };
+    paint();
+    const fit = el('select', { title: 'Fit a curve through the points' }, Object.entries(FITS).map(([k, l]) => el('option', { value: k }, l)));
+    fit.value = it.fit || 'none';
+    fit.addEventListener('change', () => { it.fit = fit.value; refresh(); });
+    const color = el('input', { type: 'color', class: 'gx-color', value: it.color, title: 'Colour' });
+    color.addEventListener('input', () => { it.color = color.value; save(); requestDraw(); });
+    const paste = async () => {
+      const t = await U.ask('Paste two columns (x and y), e.g. from a spreadsheet', '');
+      if (!t) return;
+      const rows = t.split(/\n/).map((l) => l.trim().split(/[\t;, ]+/)).filter((p) => p.length >= 2 && isFinite(num(p[0])) && isFinite(num(p[1])));
+      if (!rows.length) return U.toast('No x, y pairs found');
+      it.rows = rows.map((p) => [p[0], p[1]]);
+      paint(); refresh(); zoomToData(it);
+    };
+    return el('div', { class: 'gx-item gt-item' + (S.active === it.id ? ' active' : ''), 'data-id': it.id, onclick: () => setActive(it.id) },
+      el('div', { class: 'gx-row' }, el('span', { class: 'gt-title' }, '▦ Table'), fit, color,
+        U.el('button', { type: 'button', class: 'icon danger', title: 'Delete', onclick: () => { S.items.splice(S.items.indexOf(it), 1); if (!S.items.length) S.items.push(newItem('')); refresh(true); } }, '×')),
+      body,
+      el('div', { class: 'btn-row gt-btns' },
+        U.el('button', { type: 'button', class: 'small', onclick: () => { it.rows.push(['', '']); paint(); body.querySelectorAll('.gt-cell')[it.rows.length * 2 - 2].focus(); } }, '+ Row'),
+        U.el('button', { type: 'button', class: 'small', onclick: paste }, 'Paste…'),
+        U.el('button', { type: 'button', class: 'small', title: 'Zoom to the points', onclick: () => zoomToData(it) }, 'Zoom to fit')),
+      el('div', { class: 'gx-info gx-tinfo' }));
+  }
+  function zoomToData(it) {
+    const pts = it.fns ? it.fns.pts : [];
+    if (!pts.length) return;
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const span = Math.max((x1 - x0) / Math.max(1, W), (y1 - y0) / Math.max(1, H)) * 1.35 || S.view.s;
+    S.view = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, s: span };
+    viewChanged();
+  }
+  const newTable = (rows = [['', '']], fit = 'none') => newItem('', { type: 'table', rows, fit });
+
   function renderList() {
-    listEl.replaceChildren(...S.items.map(itemRow));
+    listEl.replaceChildren(...S.items.map((it) => (it.type === 'table' ? tableRow(it) : itemRow(it))));
     S.items.forEach(updateInfo);
   }
 
@@ -883,9 +993,14 @@
     { name: 'Logistic growth', items: ["y' = y(1 - y/8)"], ics: [[0, 0.5], [0, 12], [-6, 0.05]] },
     { name: 'Area between curves', items: ['y = x^2', 'y = x + 2', 'between(x + 2, x^2)'] },
     { name: 'Integral as area', items: ['y = sin(x)', 'int(sin(x), x, 0, pi)'] },
+    { name: 'Fourier series: square wave', items: ['y = sign(sin(x))', 'y = sum(4/(pi(2k - 1)) sin((2k - 1)x), k, 1, n)', 'n = 3'], sliders: { n: [1, 60, 1] } },
+    { name: 'Fourier series: sawtooth', items: ['y = 2atan(tan(x/2))', 'y = sum(2(-1)^(k + 1) sin(k x)/k, k, 1, n)', 'n = 4'], sliders: { n: [1, 60, 1] } },
+    { name: 'Fourier series: triangle wave', items: ['y = 2/pi asin(sin(x))', 'y = 8/pi^2 sum((-1)^k sin((2k + 1)x)/(2k + 1)^2, k, 0, n)', 'n = 1'], sliders: { n: [0, 30, 1] } },
+    { name: 'Data table with a fitted curve', items: [], table: { rows: [[0, 1.1], [1, 1.9], [2, 4.2], [3, 8.1], [4, 15.8], [5, 32.5]], fit: 'exponential' } },
   ];
   function loadExample(ex, render = true) {
     S.items = [];
+    if (ex.table) S.items.push(newTable(ex.table.rows.map((r) => r.map(String)), ex.table.fit));
     ex.items.forEach((t) => {
       const it = newItem(t);
       S.items.push(it); // before the next newItem(), so each picks an unused colour
@@ -976,6 +1091,7 @@
       el('aside', { class: 'gx-panel' },
         el('div', { class: 'gx-head' }, el('h2', {}, 'Graphing'), el('div', { class: 'btn-row' },
           U.el('button', { type: 'button', class: 'primary small', onclick: () => { const n = newItem(''); S.items.push(n); refresh(true); listEl.querySelector(`.gx-item[data-id="${n.id}"] .gx-input`).focus(); } }, '+ Expression'),
+          U.el('button', { type: 'button', class: 'small', title: 'A table of points (with an optional fitted curve)', onclick: () => { const n = newTable(); S.items.push(n); refresh(true); setActive(n.id); listEl.querySelector(`.gx-item[data-id="${n.id}"] .gt-cell`).focus(); } }, '+ Table'),
           examples,
           U.el('button', { type: 'button', class: 'small', onclick: () => { if (window.confirm('Remove all expressions?')) { S.items = [newItem('')]; refresh(true); } } }, 'Clear')),
           el('div', { class: 'btn-row' },
@@ -996,6 +1112,7 @@
         coordEl)));
     bindCanvas();
     new ResizeObserver(() => { requestDraw(); schedulePois(); }).observe(cv);
+    Theme.onChange(requestDraw);
     refresh(true);
     if (/^#g=/.test(location.hash)) openShared(location.hash);
     record();
@@ -1008,7 +1125,31 @@
     });
   }
 
+  // Other sections add things to the graph: Shell.api.graph.add(['y = x^2'], { table: { rows, fit }, view: 'fit' })
+  Shell.api.graph = {
+    add(texts = [], opts = {}) {
+      Shell.open('graph');
+      record();
+      // drop one empty expression at the end so the new ones aren't stuck below it
+      if (S.items.length && !S.items[S.items.length - 1].text.trim() && S.items[S.items.length - 1].type !== 'table') S.items.pop();
+      let tbl = null;
+      if (opts.table) { tbl = newTable(opts.table.rows.map((r) => r.map(String)), opts.table.fit || 'none'); S.items.push(tbl); }
+      for (const t of texts) S.items.push(newItem(t, opts.tRange && /^\s*\(/.test(t) ? { tmin: opts.tRange[0], tmax: opts.tRange[1] } : {}));
+      refresh(true);
+      if (opts.view) S.view = Object.assign({}, S.view, opts.view);
+      if (tbl) zoomToData(tbl);
+      viewChanged();
+      U.toast(texts.length + (tbl ? 1 : 0) > 1 ? 'Added to Graphing' : 'Added to Graphing');
+    },
+  };
+
   Shell.register('graph', {
+    commands: [
+      { label: 'Add a table of values', keywords: 'table data points fit regression wertetabelle', run: () => { const n = newTable(); S.items.push(n); refresh(true); setActive(n.id); } },
+      { label: 'Share this graph', keywords: 'link share teilen', run: () => shareLink() },
+      { label: 'Save the graph as SVG', keywords: 'export vector svg', run: () => saveSVG() },
+      ...EXAMPLES.map((ex) => ({ label: `Graph example: ${ex.name}`, keywords: 'example beispiel ' + ex.name, run: () => loadExample(ex) })),
+    ],
     label: 'Graphing', key: 3, order: 3, root: () => document.getElementById('mod-graph'), init,
     onShow: () => requestDraw(),
     desc: 'Plot functions, polar and parametric curves, equations and inequalities. Sliders, tracing, roots, extrema and intersections.',

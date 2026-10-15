@@ -2,7 +2,7 @@
 (() => {
   const { el } = U;
   const KEY = 'mathsim.calc.v1';
-  const st = { history: [], vars: { ans: 0 }, cvars: {}, defs: {}, deg: false, second: false, hpos: -1 };
+  const st = { history: [], vars: { ans: 0 }, cvars: {}, lvars: {}, defs: {}, deg: false, second: false, hpos: -1 };
   // exactVars: exact (BigInt) values of variables, so ans keeps all digits of 50!
   const scope = { vars: st.vars, funcs: {}, exactVars: {} };
   let input, preview, histEl, varsEl, keysEl, modeBtn;
@@ -14,12 +14,13 @@
       st.history = Array.isArray(s.history) ? s.history.slice(-200) : [];
       for (const [k, v] of Object.entries(s.vars || {})) st.vars[k] = typeof v === 'number' ? v : NaN;
       for (const [k, z] of Object.entries(s.cvars || {})) if (Array.isArray(z)) st.cvars[k] = z;
+      for (const [k, z] of Object.entries(s.lvars || {})) if (Array.isArray(z)) st.lvars[k] = z;
       st.defs = s.defs || {};
       st.deg = !!s.deg;
       for (const [name, d] of Object.entries(st.defs)) { try { defineFn(name, d.params, d.body); } catch { delete st.defs[name]; } }
     } catch { /* fresh start */ }
   }
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ history: st.history.slice(-200), vars: st.vars, cvars: st.cvars, defs: st.defs, deg: st.deg })); } catch { /* storage full */ } };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ history: st.history.slice(-200), vars: st.vars, cvars: st.cvars, lvars: st.lvars, defs: st.defs, deg: st.deg })); } catch { /* storage full */ } };
 
   const angles = () => { MX.M.af = st.deg ? Math.PI / 180 : 1; };
 
@@ -49,9 +50,40 @@
     return (n < 0 ? '−' : '') + parts.join(' · ');
   }
 
+  // "u cross v" and "u dot v" → cross(u, v) / dot(u, v); operands are bracket groups or names
+  function infix(src) {
+    const re = /\s(cross|dot)\s+(?!\()/;
+    for (let guard = 0; guard < 20; guard++) {
+      const m = re.exec(src);
+      if (!m) return src;
+      const W = /[\w.]/;
+      const match = (i, dir) => { // index of the bracket matching src[i]
+        for (let d = 0; i >= 0 && i < src.length; i += dir) { if ('([' .includes(src[i])) d += dir; else if (')]'.includes(src[i])) d -= dir; if (!d) return i; }
+        return -1;
+      };
+      const operand = (i, dir) => {
+        while (src[i] === ' ') i += dir;
+        const start = i;
+        if (dir < 0) {
+          if (')]'.includes(src[i])) { i = match(i, -1); if (i < 0) return [0, 0]; i--; }
+          while (i >= 0 && W.test(src[i])) i--;
+          return [i + 1, start + 1];
+        }
+        while (i < src.length && W.test(src[i])) i++;
+        if ('(['.includes(src[i] || ' ')) { i = match(i, 1); if (i < 0) return [0, 0]; i++; }
+        return [start, i];
+      };
+      const [l0, l1] = operand(m.index - 1, -1), [r0, r1] = operand(m.index + m[0].length, 1);
+      if (l0 >= l1 || r0 >= r1) return src;
+      src = src.slice(0, l0) + `${m[1]}(${src.slice(l0, l1)}, ${src.slice(r0, r1)})` + src.slice(r1);
+    }
+    return src;
+  }
+
   // Runs one line. Returns a history entry (or throws).
   function run(src) {
     angles();
+    src = infix(src);
     const ast = MX.parse(src);
     if (ast.t === 'cmp' && ast.op === '=') {
       // a = 5  → variable
@@ -96,7 +128,7 @@
     }
     const r = compute(src, ast);
     setVar('ans', r);
-    return { src, kind: 'value', value: r.value, display: r.display, alt: r.alt, exact: r.exact };
+    return { src, kind: 'value', value: r.value, display: r.display, alt: r.alt, exact: r.exact, sym: r.sym };
   }
 
   // Stores a computed result in a variable (real, exact and complex parts kept in step).
@@ -104,6 +136,7 @@
     st.vars[name] = r.value == null ? NaN : r.value;
     if (r.complex && r.complex[1] !== 0) st.cvars[name] = r.complex; else delete st.cvars[name];
     if (r.q) scope.exactVars[name] = r.q; else delete scope.exactVars[name];
+    if (r.lin) st.lvars[name] = r.lin; else delete st.lvars[name];
   }
 
   // Coefficients (low → high) when fn is a polynomial of degree ≤ 10, else null.
@@ -122,6 +155,14 @@
   // Evaluates an expression the best available way: with units, as a real number (plus its exact
   // rational / big-integer form), or as a complex number. Returns { display, alt, value, exact, complex, q }.
   function compute(src, ast, preview = false) {
+    // expand / factor / simplify / derive / integrate: exact algebra, the answer is an expression
+    if (Algebra.isCAS(ast)) return { display: Algebra.run(ast), alt: '', value: null, sym: true };
+    // vectors and matrices
+    if (Algebra.usesLinalg(ast, st.lvars)) {
+      const r = Algebra.linalg(ast, { vars: st.vars, lvars: st.lvars });
+      if (typeof r === 'number') return { display: MX.fmt(r), alt: describe(r), value: r };
+      return { display: Algebra.fmtLin(r), alt: Algebra.kind(r), value: null, lin: r };
+    }
     const u = CalcX.units(src, scope); // throws for unit mistakes such as 3 m + 2 s
     if (u) return { display: u.text, alt: u.alt || '', value: u.value };
     let v, err = null;
@@ -165,7 +206,13 @@
         ? el('div', { class: 'cx-res', title: 'Click to use this value', onclick: () => insert(h.exact || (h.value != null && isFinite(h.value) ? MX.fmt(h.value) : 'ans')) }, '= ' + (h.display || MX.fmt(h.value)))
         : el('div', { class: 'cx-res small' }, h.text);
     const alt = !h.error && h.kind === 'value' ? (h.alt !== undefined ? h.alt : describe(h.value)) : '';
+    // "Plot" for functions of x: f(x) = … definitions, and expressions that failed only because x is unknown
+    let plot = null;
+    if (h.kind === 'def' && /^\s*[A-Za-z]\w*\(\s*x\s*\)\s*=/.test(h.src)) plot = [h.src];
+    else if (h.error && /Unknown name 'x'/.test(h.error)) plot = ['y = ' + h.src];
+    else if (h.kind === 'value' && h.sym && /\bx\b/.test(h.display || '') && !/[=/]/.test(h.display)) plot = ['y = ' + h.display.replace(/ \+ C$/, '')];
     return el('div', { class: 'cx-entry' },
+      plot ? el('button', { type: 'button', class: 'small cx-plot', title: 'Draw it in Graphing', onclick: () => Shell.api.graph && Shell.api.graph.add(plot) }, '📈 Plot') : null,
       el('div', { class: 'cx-src mono', title: 'Click to edit', onclick: () => { input.value = h.src; input.focus(); updatePreview(); } }, h.src),
       result,
       alt ? el('div', { class: 'cx-alt' }, alt) : null,
@@ -185,8 +232,8 @@
     for (const [k, v] of Object.entries(st.vars)) {
       rows.push(el('div', { class: 'cx-var' },
         el('button', { type: 'button', class: 'linkish mono', onclick: () => insert(k) }, k),
-        el('span', { class: 'mono' }, st.cvars[k] ? CalcX.cString(st.cvars[k]) : scope.exactVars[k] ? CalcX.qString(scope.exactVars[k]) : MX.fmt(v)),
-        k === 'ans' ? el('span') : el('button', { type: 'button', class: 'icon danger', title: 'Delete', onclick: () => { delete st.vars[k]; delete st.cvars[k]; delete scope.exactVars[k]; save(); renderVars(); } }, '×')));
+        el('span', { class: 'mono' }, st.lvars[k] ? Algebra.fmtLin(st.lvars[k]) : st.cvars[k] ? CalcX.cString(st.cvars[k]) : scope.exactVars[k] ? CalcX.qString(scope.exactVars[k]) : MX.fmt(v)),
+        k === 'ans' ? el('span') : el('button', { type: 'button', class: 'icon danger', title: 'Delete', onclick: () => { delete st.vars[k]; delete st.cvars[k]; delete st.lvars[k]; delete scope.exactVars[k]; save(); renderVars(); } }, '×')));
     }
     for (const [k, d] of Object.entries(st.defs)) {
       rows.push(el('div', { class: 'cx-var' },
@@ -203,6 +250,7 @@
     if (!src) { preview.textContent = ''; return; }
     try {
       angles();
+      src = infix(src);
       const ast = MX.parse(src);
       if (ast.t === 'cmp' && ast.op === '=') { preview.textContent = 'Enter to ' + (ast.a.t === 'var' || ast.a.t === 'call' ? 'define' : 'solve'); return; }
       preview.textContent = '= ' + compute(src, ast, true).display;
@@ -310,6 +358,9 @@
         el('li', {}, 'Complex numbers: sqrt(-4), (2 + 3i)(1 − i), e^(iπ) — i is on 2nd + π'),
         el('li', {}, 'Exact results: 30!, 2^200, 1/3 + 1/6 (whole numbers of any size, exact fractions)'),
         el('li', {}, 'Units: 5 km/h in m/s, 3 ft + 20 cm, 60 mph * 2 h in km, 100 °F in °C'),
+        el('li', {}, 'Algebra: expand((x + 2)^3), factor(x^2 - 5x + 6), simplify((x^2 - 1)/(x - 1)), derive(x^2 sin(x)), integrate(3x^2 + 2x)'),
+        el('li', {}, 'Vectors and matrices: v = [1, 2, 3], dot(v, [4, 5, 6]), cross(…), M = [[1, 2], [3, 4]], det(M), inv(M), M^2, M * v'),
+        el('li', {}, 'f(x) = … or an expression in x: click 📈 Plot to draw it in Graphing'),
         el('li', {}, 'a = 5 stores a variable; f(x) = x^2 defines a function'),
         el('li', {}, '2x + 3 = 11 solves for the unknown (all real solutions between −1000 and 1000)'),
         el('li', {}, 'Up / Down arrows: previous inputs · Esc: clear')));
@@ -359,7 +410,21 @@
     });
   }
 
+  const setInput = (s, caretBack = 0) => { input.value = s; input.focus(); input.setSelectionRange(s.length - caretBack, s.length - caretBack); updatePreview(); };
+  Shell.api.calc = { run: (src) => { setInput(src); submit(); }, insert: (s) => insert(s) };
+
   Shell.register('calc', {
+    commands: [
+      { label: 'Factor a polynomial', keywords: 'algebra factorise faktorisieren', run: () => setInput('factor(x^2 - 5x + 6)') },
+      { label: 'Expand an expression', keywords: 'algebra multiply out ausmultiplizieren', run: () => setInput('expand((x + 2)^3)') },
+      { label: 'Simplify a fraction of polynomials', keywords: 'algebra cancel kürzen', run: () => setInput('simplify((x^2 - 1)/(x - 1))') },
+      { label: 'Symbolic derivative', keywords: 'derive differentiate ableitung', run: () => setInput('derive(x^2 sin(x))') },
+      { label: 'Vectors: dot and cross product', keywords: 'vector skalarprodukt kreuzprodukt', run: () => setInput('cross([1, 0, 0], [0, 1, 0])') },
+      { label: 'Matrix in the calculator', keywords: 'matrix determinant inverse', run: () => setInput('det([[1, 2], [3, 4]])') },
+      { label: 'Unit conversion', keywords: 'units convert km mph einheiten', run: () => setInput('36 km/h in m/s') },
+      { label: 'Complex numbers', keywords: 'complex imaginary komplex', run: () => setInput('(2 + 3i)(1 - i)') },
+      { label: 'Solve an equation', keywords: 'solve gleichung lösen', run: () => setInput('2x + 3 = 11') },
+    ],
     label: 'Calculator', key: 2, order: 2, root: () => document.getElementById('mod-calc'), init,
     onShow: () => setTimeout(() => input && input.focus(), 0),
     desc: 'Scientific calculator with history, variables, your own functions, fractions, and an equation solver.',

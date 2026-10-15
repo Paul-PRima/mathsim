@@ -205,7 +205,7 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
     if (!W || !H) return;
     for (const c of [cv, overlay]) if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
     gl.viewport(0, 0, cv.width, cv.height);
-    gl.clearColor(0.047, 0.055, 0.075, 1);
+    if (Theme.light) gl.clearColor(1, 1, 1, 1); else gl.clearColor(0.047, 0.055, 0.075, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
     const cam = camera();
@@ -257,7 +257,7 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
     gl.bindVertexArray(null);
     // tick labels on three edges facing the viewer
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(232,234,240,0.75)';
+    ctx.fillStyle = Theme.label;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const toModel = (x, y, z) => [(x - bounds.cxm) * bounds.sx, (y - bounds.cym) * bounds.sy, (z - bounds.czm) * bounds.sz];
     const axis = (name, r, place) => {
@@ -265,7 +265,7 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
       for (const v of t.values) { const [px, py] = project(cam.mvp, place(v)); ctx.fillText(Charts.tickLabel(v, t.step), px, py); }
       const [px, py] = project(cam.mvp, place((r[0] + r[1]) / 2).map((q, i) => q * (i === 2 ? 1 : 1.18)));
       ctx.fillStyle = '#ffc078'; ctx.font = '600 13px system-ui, sans-serif'; ctx.fillText(name, px, py);
-      ctx.fillStyle = 'rgba(232,234,240,0.75)'; ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = Theme.label; ctx.font = '11px system-ui, sans-serif';
     };
     // pick the box corner nearest the camera's opposite side for the labels
     const sxs = cam.eye[0] > 0 ? -1 : 1, sys = cam.eye[2] > 0 ? 1 : -1;
@@ -384,6 +384,7 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
     cv.addEventListener('pointerup', () => { drag = null; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); st.cam.dist = U.clamp(st.cam.dist * Math.exp(e.deltaY * 0.001), 1.2, 20); save(); requestDraw(); }, { passive: false });
     new ResizeObserver(requestDraw).observe(cv);
+    Theme.onChange(requestDraw);
     rows();
     build();
   }

@@ -46,7 +46,7 @@ const Geo = (() => {
   const polyArea = (pts) => Math.abs(pts.reduce((s, p, i) => s + crs(p, pts[(i + 1) % pts.length]), 0)) / 2;
 
   // Computes every object's geometry. objs: [{ id, type, ... }]; returns Map id -> geometry (or null).
-  function solve(objs) {
+  function solve(objs, withLoci = true) {
     const G = new Map();
     const P = (id) => { const g = G.get(id); return g && g.pt ? g.pt : null; };
     for (const o of objs) {
@@ -82,6 +82,28 @@ const Geo = (() => {
             break;
           }
           case 'circle': { const c = P(o.c), p = P(o.p); if (c && p) g = { c, r: dist(c, p) }; break; }
+          // transformed points
+          case 'reflectL': { const p = P(o.src), L = G.get(o.line); if (p && L && L.d) { const t = dot(sub(p, L.p), L.d) / dot(L.d, L.d); g = { pt: sub(mul(add(L.p, mul(L.d, t)), 2), p) }; } break; }
+          case 'reflectP': { const p = P(o.src), c = P(o.c); if (p && c) g = { pt: sub(mul(c, 2), p) }; break; }
+          case 'rotate': { const p = P(o.src), c = P(o.c); if (p && c) { const a = (o.deg * Math.PI) / 180, v = sub(p, c); g = { pt: add(c, { x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) }) }; } break; }
+          case 'translate': { const p = P(o.src), a = P(o.a), b = P(o.b); if (p && a && b) g = { pt: add(p, sub(b, a)) }; break; }
+          case 'dilate': { const p = P(o.src), c = P(o.c); if (p && c) g = { pt: add(c, mul(sub(p, c), o.k)) }; break; }
+          case 'locus': { // the path of point p while the point q slides along its line or circle
+            if (!withLoci) break;
+            const qi = objs.findIndex((x) => x.id === o.q), Q = objs[qi], H = Q && G.get(Q.on);
+            if (!Q || Q.type !== 'onObj' || !H) break;
+            const upto = objs.slice(0, objs.indexOf(o)).map((x) => (x.id === Q.id ? { ...x } : x));
+            const q = upto.find((x) => x.id === Q.id);
+            const [t0, t1] = H.c ? [-Math.PI, Math.PI] : H.kind === 'segment' ? [0, 1] : H.kind === 'ray' ? [0, 40] : [-20, 20];
+            const path = [];
+            for (let i = 0; i <= 240; i++) {
+              q.t = t0 + ((t1 - t0) * i) / 240;
+              const g2 = solve(upto, false).get(o.p);
+              path.push(g2 && g2.pt ? g2.pt : null);
+            }
+            g = { path };
+            break;
+          }
           case 'circleR': { const c = P(o.c); if (c && o.r > 0) g = { c, r: o.r }; break; }
           case 'angle': { const a = P(o.a), b = P(o.b), c = P(o.c); if (a && b && c) g = { a, b, c, deg: angleAt(a, b, c) }; break; }
           case 'polygon': { const pts = o.pts.map(P); if (pts.every(Boolean)) g = { pts, area: polyArea(pts), per: pts.reduce((s, p, i) => s + dist(p, pts[(i + 1) % pts.length]), 0) }; break; }
@@ -101,7 +123,7 @@ const Geo = (() => {
 (() => {
   const { el } = U;
   const KEY = 'mathsim.geometry.v1';
-  const PT_COLOR = '#4dabf7', LINE_COLOR = '#e8eaf0', CIRCLE_COLOR = '#51cf66', ANGLE_COLOR = '#ffc078', POLY_COLOR = '#cc5de8';
+  const PT_COLOR = '#4dabf7', CIRCLE_COLOR = '#51cf66', ANGLE_COLOR = '#ffc078', POLY_COLOR = '#cc5de8';
   const st = { objs: [], view: { cx: 0, cy: 0, s: 0.02 }, grid: true, snap: true, nextId: 1 };
   let cv, ctx, W = 1, H = 1, listEl, hintEl;
   let tool = 'move', pending = [], mouse = null, G = new Map(), hover = null, queued = false;
@@ -122,6 +144,12 @@ const Geo = (() => {
     ['intersect', '✕', 'Intersect', 'Click two lines or circles'],
     ['angle', '∠', 'Angle', 'Click three points — the middle one is the vertex'],
     ['polygon', '⬠', 'Polygon', 'Click the corners, then the first one again'],
+    ['reflect', '⇋', 'Reflect', 'Click the object, then the mirror line (or a point)'],
+    ['rotate', '⟲', 'Rotate', 'Click the object, then the centre, then type the angle'],
+    ['translate', '⇉', 'Translate', 'Click the object, then two points for the vector'],
+    ['dilate', '⤢', 'Enlarge', 'Click the object, then the centre, then type the factor'],
+    ['locus', '∿', 'Locus', 'Click a point, then the point on a line or circle that drives it'],
+    ['trace', '✎', 'Trace', 'Click a point to leave a trail when things move (click again to stop)'],
     ['delete', '🗑', 'Delete', 'Click an object (anything built on it goes too)'],
   ];
 
@@ -130,7 +158,7 @@ const Geo = (() => {
   function nextName(type) {
     const used = new Set(st.objs.map((o) => o.name));
     const pick = (alphabet, suffix = '') => { for (const c of alphabet) if (!used.has(c + suffix)) return c + suffix; return null; };
-    if (['point', 'onObj', 'midpoint', 'intersection'].includes(type)) { for (let k = 0; ; k++) { const n = pick(LETTERS, k ? String(k) : ''); if (n) return n; } }
+    if (['point', 'onObj', 'midpoint', 'intersection', 'reflectL', 'reflectP', 'rotate', 'translate', 'dilate'].includes(type)) { for (let k = 0; ; k++) { const n = pick(LETTERS, k ? String(k) : ''); if (n) return n; } }
     if (['circle', 'circleR'].includes(type)) { for (let k = 0; ; k++) { const n = pick('cdkpq', k ? String(k) : ''); if (n) return n; } }
     if (type === 'angle') { for (let k = 0; ; k++) { const n = pick('αβγδεζηθ', k ? String(k) : ''); if (n) return n; } }
     if (type === 'polygon') { for (let k = 1; ; k++) if (!used.has('poly' + k)) return 'poly' + k; }
@@ -153,12 +181,24 @@ const Geo = (() => {
   function removeWithDependents(id) {
     const gone = new Set([id]);
     for (const o of st.objs) {
-      const refs = [o.a, o.b, o.c, o.p, o.line, o.on, ...(o.pts || [])].filter((v) => v != null);
+      const refs = [o.a, o.b, o.c, o.p, o.q, o.line, o.on, o.src, ...(o.pts || [])].filter((v) => v != null);
       if (refs.some((r) => gone.has(r))) gone.add(o.id);
     }
     st.objs = st.objs.filter((o) => !gone.has(o.id));
   }
-  function changed() { G = Geo.solve(st.objs); renderList(); save(); requestDraw(); }
+  function changed() { G = Geo.solve(st.objs); recordTraces(); renderList(); save(); requestDraw(); }
+  function recordTraces() {
+    for (const o of st.objs) {
+      if (!o.trace) continue;
+      const g = G.get(o.id);
+      if (!g || !g.pt) continue;
+      const t = traces.get(o.id) || [];
+      const last = t[t.length - 1];
+      if (!last || Math.hypot(last.x - g.pt.x, last.y - g.pt.y) > st.view.s * 2) t.push({ x: g.pt.x, y: g.pt.y });
+      if (t.length > 5000) t.shift();
+      traces.set(o.id, t);
+    }
+  }
 
   // ---------------------------------------------------------------- view
   const toPx = (x) => W / 2 + (x - st.view.cx) / st.view.s;
@@ -228,6 +268,33 @@ const Geo = (() => {
     hintEl.textContent = info ? `${info[2]}: ${info[3]}` : '';
     requestDraw();
   }
+  // Builds the image of object o, using mk(pointId) → id of that point's image.
+  function transformObject(o, mk, k = 1) {
+    const pointTypes = ['point', 'onObj', 'midpoint', 'intersection', 'reflectL', 'reflectP', 'rotate', 'translate', 'dilate'];
+    if (pointTypes.includes(o.type)) return mk(o.id);
+    if (['segment', 'line', 'ray'].includes(o.type)) return create({ type: o.type, a: mk(o.a), b: mk(o.b) }).id;
+    if (o.type === 'circle') return create({ type: 'circle', c: mk(o.c), p: mk(o.p) }).id;
+    if (o.type === 'circleR') return create({ type: 'circleR', c: mk(o.c), r: o.r * Math.abs(k) }).id;
+    if (o.type === 'polygon') return create({ type: 'polygon', pts: o.pts.map(mk) }).id;
+    if (o.type === 'angle') return create({ type: 'angle', a: mk(o.a), b: mk(o.b), c: mk(o.c) }).id;
+    if (o.type === 'bisector') return create({ type: 'bisector', a: mk(o.a), b: mk(o.b) }).id;
+    U.toast('Transform the points this object is built from instead');
+    return null;
+  }
+  function applyTransform(o, spec) {
+    const made = new Map();
+    const mk = (id) => {
+      if (made.has(id)) return made.get(id);
+      const src = byId(id);
+      const p = create(Object.assign({ src: id }, spec));
+      if (src && !st.objs.some((x) => x.name === src.name + '′')) p.name = src.name + '′';
+      made.set(id, p.id);
+      return p.id;
+    };
+    transformObject(o, mk, spec.k);
+  }
+  const traces = new Map(); // point id → trail of positions
+
   async function clickTool(px, py) {
     const twoPoints = { segment: 1, line: 1, ray: 1, circle: 1, midpoint: 1, bisector: 1 };
     if (tool === 'point') { snapshot(); pointAt(px, py); changed(); return; }
@@ -285,6 +352,56 @@ const Geo = (() => {
       changed();
       return;
     }
+    if (tool === 'reflect' || tool === 'rotate' || tool === 'translate' || tool === 'dilate') {
+      if (!pending.length) {
+        const o = pick(px, py, (x) => x.type !== 'locus');
+        if (!o) return;
+        pending.push(o.id);
+        hintEl.textContent = { reflect: 'Now click the mirror line, or a point to reflect in', rotate: 'Now click the centre of rotation', translate: 'Now click the start of the vector', dilate: 'Now click the centre of enlargement' }[tool];
+        requestDraw();
+        return;
+      }
+      const src = byId(pending[0]);
+      if (tool === 'reflect') {
+        const ln = pick(px, py, isLine);
+        snapshot();
+        if (ln) applyTransform(src, { type: 'reflectL', line: ln.id });
+        else applyTransform(src, { type: 'reflectP', c: pointAt(px, py) });
+        pending = []; setTool(tool); changed(); return;
+      }
+      if (tool === 'translate') {
+        if (pending.length === 1) { snapshot(); pending.push(pointAt(px, py)); hintEl.textContent = 'Now click the end of the vector'; changed(); return; }
+        applyTransform(src, { type: 'translate', a: pending[1], b: pointAt(px, py) });
+        pending = []; setTool(tool); changed(); return;
+      }
+      snapshot();
+      const c = pointAt(px, py);
+      changed();
+      const v = await U.ask(tool === 'rotate' ? 'Angle in degrees (counter-clockwise)' : 'Enlargement factor (e.g. 2 or 0.5 or -1)', tool === 'rotate' ? '90' : '2');
+      const val = v == null ? NaN : MX.evaluate(v);
+      if (isFinite(val)) applyTransform(src, tool === 'rotate' ? { type: 'rotate', c, deg: val } : { type: 'dilate', c, k: val });
+      pending = []; setTool(tool); changed();
+      return;
+    }
+    if (tool === 'locus') {
+      const o = pick(px, py, isPoint);
+      if (!o) return;
+      if (!pending.length) { pending.push(o.id); hintEl.textContent = 'Now click the point that moves along a line or circle (made with Point on that line or circle)'; return; }
+      if (o.type !== 'onObj') return U.toast('Pick a point that lies on a line or circle');
+      snapshot();
+      create({ type: 'locus', p: pending[0], q: o.id });
+      pending = []; setTool(tool); changed();
+      return;
+    }
+    if (tool === 'trace') {
+      const o = pick(px, py, isPoint);
+      if (!o) return;
+      o.trace = !o.trace;
+      if (!o.trace) traces.delete(o.id);
+      U.toast(o.trace ? `Tracing ${o.name} — drag something to see its path` : `Stopped tracing ${o.name}`);
+      changed();
+      return;
+    }
     if (tool === 'polygon') {
       if (!pending.length) snapshot();
       const id = pointAt(px, py);
@@ -313,7 +430,7 @@ const Geo = (() => {
     if (!W || !H) return;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#0c0e13';
+    ctx.fillStyle = Theme.bg;
     ctx.fillRect(0, 0, W, H);
     if (st.grid) drawGrid();
     const hov = hover && hover.id;
@@ -332,12 +449,12 @@ const Geo = (() => {
       const w = hov === o.id ? 3.4 : 2;
       if (g.d) {
         const [a, b] = lineSpan(g);
-        ctx.strokeStyle = o.type === 'perp' || o.type === 'parallel' || o.type === 'bisector' ? '#9aa3b5' : LINE_COLOR;
+        ctx.strokeStyle = o.type === 'perp' || o.type === 'parallel' || o.type === 'bisector' ? Theme.muted : Theme.text;
         ctx.lineWidth = w;
         ctx.setLineDash(o.type === 'bisector' ? [7, 5] : []);
         ctx.beginPath(); ctx.moveTo(toPx(a.x), toPy(a.y)); ctx.lineTo(toPx(b.x), toPy(b.y)); ctx.stroke();
         ctx.setLineDash([]);
-        if (o.type === 'segment') label(o.name, (toPx(a.x) + toPx(b.x)) / 2, (toPy(a.y) + toPy(b.y)) / 2, '#9aa3b5', 8, -8);
+        if (o.type === 'segment') label(o.name, (toPx(a.x) + toPx(b.x)) / 2, (toPy(a.y) + toPy(b.y)) / 2, Theme.muted, 8, -8);
       } else if (g.c) {
         ctx.strokeStyle = CIRCLE_COLOR; ctx.lineWidth = w;
         ctx.beginPath(); ctx.arc(toPx(g.c.x), toPy(g.c.y), g.r / st.view.s, 0, Math.PI * 2); ctx.stroke();
@@ -358,13 +475,32 @@ const Geo = (() => {
     }
     for (const o of shown) {
       const g = G.get(o.id);
+      if (!g || !g.path) continue;
+      ctx.strokeStyle = '#ff922b'; ctx.lineWidth = hov === o.id ? 3.4 : 2.4;
+      ctx.beginPath();
+      let pen = false;
+      for (const p of g.path) {
+        if (!p) { pen = false; continue; }
+        pen ? ctx.lineTo(toPx(p.x), toPy(p.y)) : ctx.moveTo(toPx(p.x), toPy(p.y));
+        pen = true;
+      }
+      ctx.stroke();
+    }
+    for (const [id, trail] of traces) {
+      const o = byId(id);
+      if (!o || o.hidden) continue;
+      ctx.fillStyle = 'rgba(255,146,43,0.55)';
+      for (const p of trail) ctx.fillRect(toPx(p.x) - 1.5, toPy(p.y) - 1.5, 3, 3);
+    }
+    for (const o of shown) {
+      const g = G.get(o.id);
       if (!g || !g.pt) continue;
       const free = o.type === 'point' || o.type === 'onObj';
       const x = toPx(g.pt.x), y = toPy(g.pt.y);
       ctx.beginPath(); ctx.arc(x, y, hov === o.id ? 6.5 : 5, 0, Math.PI * 2);
-      ctx.fillStyle = free ? PT_COLOR : '#8a90a0'; ctx.fill();
-      ctx.strokeStyle = '#0c0e13'; ctx.lineWidth = 1.5; ctx.stroke();
-      label(o.name, x, y, free ? '#cfe6ff' : '#c3c8d4', 8, -10);
+      ctx.fillStyle = free ? PT_COLOR : Theme.muted; ctx.fill();
+      ctx.strokeStyle = Theme.halo; ctx.lineWidth = 1.5; ctx.stroke();
+      label(o.name, x, y, free ? (Theme.light ? '#1864ab' : '#cfe6ff') : Theme.label, 8, -10);
     }
     // construction in progress: a rubber band to the mouse
     if (pending.length && mouse) {
@@ -383,24 +519,24 @@ const Geo = (() => {
   function label(text, x, y, color, dx = 0, dy = 0, align = 'left') {
     ctx.font = '600 12px system-ui, sans-serif';
     ctx.textAlign = align; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3; ctx.strokeStyle = '#0c0e13'; ctx.strokeText(text, x + dx, y + dy);
+    ctx.lineWidth = 3; ctx.strokeStyle = Theme.halo; ctx.strokeText(text, x + dx, y + dy);
     ctx.fillStyle = color; ctx.fillText(text, x + dx, y + dy);
   }
   function drawGrid() {
     const step = Charts.niceStep(70 * st.view.s, 1);
     const x0 = fromPx(0), x1 = fromPx(W), y0 = fromPy(H), y1 = fromPy(0);
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.strokeStyle = Theme.gridMajor; ctx.lineWidth = 1; ctx.beginPath();
     for (let v = Math.ceil(x0 / step) * step; v <= x1; v += step) { const p = Math.round(toPx(v)) + 0.5; ctx.moveTo(p, 0); ctx.lineTo(p, H); }
     for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) { const p = Math.round(toPy(v)) + 0.5; ctx.moveTo(0, p); ctx.lineTo(W, p); }
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath();
+    ctx.strokeStyle = Theme.axis; ctx.beginPath();
     ctx.moveTo(toPx(0), 0); ctx.lineTo(toPx(0), H); ctx.moveTo(0, toPy(0)); ctx.lineTo(W, toPy(0)); ctx.stroke();
-    ctx.fillStyle = 'rgba(232,234,240,0.45)'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillStyle = Theme.label; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     for (let v = Math.ceil(x0 / step) * step; v <= x1; v += step) if (Math.abs(v) > step / 2) ctx.fillText(Charts.tickLabel(v, step), toPx(v), U.clamp(toPy(0) + 3, 2, H - 12));
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) if (Math.abs(v) > step / 2) ctx.fillText(Charts.tickLabel(v, step), U.clamp(toPx(0) - 4, 24, W - 2), toPy(v));
   }
-  const fmt = (v) => MX.fmt(+v.toPrecision(5));
+  const fmt = (v) => MX.fmt(Math.abs(v) < 1e-9 ? 0 : +v.toPrecision(5));
 
   // ---------------------------------------------------------------- object list
   function describe(o) {
@@ -409,6 +545,12 @@ const Geo = (() => {
     switch (o.type) {
       case 'point': return [`point (${fmt(o.x)}, ${fmt(o.y)})`, true];
       case 'onObj': return [`point on ${nm(o.on)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'reflectL': return [`reflection of ${nm(o.src)} in ${nm(o.line)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'reflectP': return [`reflection of ${nm(o.src)} in ${nm(o.c)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'rotate': return [`${nm(o.src)} rotated ${fmt(o.deg)}° about ${nm(o.c)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'translate': return [`${nm(o.src)} moved by vector ${nm(o.a)}${nm(o.b)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'dilate': return [`${nm(o.src)} enlarged ×${fmt(o.k)} from ${nm(o.c)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : '  (undefined)')];
+      case 'locus': return [`locus of ${nm(o.p)} as ${nm(o.q)} moves`];
       case 'midpoint': return [`midpoint of ${nm(o.a)}${nm(o.b)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : undef)];
       case 'intersection': return [`intersection of ${nm(o.a)} and ${nm(o.b)}` + (g ? `  (${fmt(g.pt.x)}, ${fmt(g.pt.y)})` : undef)];
       case 'segment': return [`segment ${nm(o.a)}${nm(o.b)}` + (g ? `  · length ${fmt(Math.hypot(g.d.x, g.d.y))}` : undef)];
@@ -473,6 +615,24 @@ const Geo = (() => {
       const F = create({ type: 'intersection', a: l.id, b: p.id, which: 0 });
       create({ type: 'segment', a: P.id, b: F.id });
     },
+    'Reflection and rotation': () => {
+      const A = create({ type: 'point', x: -5, y: 1 }), B = create({ type: 'point', x: -2, y: 1 }), C = create({ type: 'point', x: -3, y: 4 });
+      const T = create({ type: 'polygon', pts: [A.id, B.id, C.id] });
+      const P1 = create({ type: 'point', x: 0, y: -4 }), P2 = create({ type: 'point', x: 0.5, y: 5 });
+      const m = create({ type: 'line', a: P1.id, b: P2.id });
+      applyTransform(T, { type: 'reflectL', line: m.id });
+      const O = create({ type: 'point', x: 3, y: -2 });
+      applyTransform(T, { type: 'rotate', c: O.id, deg: 90 });
+    },
+    'Locus: midpoint of a moving segment': () => {
+      const O = create({ type: 'point', x: 0, y: 0 }), R = create({ type: 'point', x: 3, y: 0 });
+      const k = create({ type: 'circle', c: O.id, p: R.id });
+      const Q = create({ type: 'onObj', on: k.id, t: 0.9 });
+      const A = create({ type: 'point', x: 6, y: 2 });
+      create({ type: 'segment', a: A.id, b: Q.id });
+      const M = create({ type: 'midpoint', a: A.id, b: Q.id });
+      create({ type: 'locus', p: M.id, q: Q.id });
+    },
     'Two circles intersecting': () => {
       const A = create({ type: 'point', x: -2, y: 0 }), B = create({ type: 'point', x: 2, y: 0.5 });
       const c = create({ type: 'circleR', c: A.id, r: 3 }), d = create({ type: 'circleR', c: B.id, r: 2.5 });
@@ -480,6 +640,29 @@ const Geo = (() => {
       create({ type: 'polygon', pts: [A.id, S1.id, B.id, S2.id] });
     },
   };
+
+  // The construction as equations in the Graphing section.
+  function toGraphing() {
+    const f = (v) => MX.fmt(+v.toFixed(4));
+    const sg = (v) => (v < 0 ? ` - ${f(-v)}` : ` + ${f(v)}`);
+    const texts = [];
+    const seg = (a, b) => texts.push(`(${f(a.x)}${sg(b.x - a.x)}t, ${f(a.y)}${sg(b.y - a.y)}t)`);
+    for (const o of st.objs) {
+      const g = G.get(o.id);
+      if (!g || o.hidden) continue;
+      if (g.pt) texts.push(`(${f(g.pt.x)}, ${f(g.pt.y)})`);
+      else if (g.c) texts.push(`(x${sg(-g.c.x)})^2 + (y${sg(-g.c.y)})^2 = ${f(g.r * g.r)}`);
+      else if (g.d && g.kind === 'segment') seg(g.p, add2(g.p, g.d));
+      else if (g.d && g.kind === 'ray') seg(g.p, add2(g.p, { x: g.d.x * 40, y: g.d.y * 40 }));
+      else if (g.d) {
+        if (Math.abs(g.d.x) < 1e-12) texts.push(`x = ${f(g.p.x)}`);
+        else { const m = g.d.y / g.d.x; texts.push(`y = ${f(m)}x${sg(g.p.y - m * g.p.x)}`); }
+      } else if (g.pts) g.pts.forEach((p, i) => seg(p, g.pts[(i + 1) % g.pts.length]));
+    }
+    if (!texts.length) return U.toast('Nothing to send yet');
+    Shell.api.graph.add(texts, { tRange: [0, 1], view: { cx: st.view.cx, cy: st.view.cy, s: st.view.s } });
+  }
+  const add2 = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
 
   // ---------------------------------------------------------------- page
   function init(root) {
@@ -499,7 +682,8 @@ const Geo = (() => {
           el('div', { class: 'btn-row' }, exSel,
             U.el('button', { type: 'button', class: 'small', title: 'Undo (Ctrl+Z)', onclick: undo }, '↶'),
             U.el('button', { type: 'button', class: 'small', title: 'Redo (Ctrl+Y)', onclick: redo }, '↷'),
-            U.el('button', { type: 'button', class: 'small', onclick: () => { if (window.confirm('Remove everything?')) { snapshot(); st.objs = []; changed(); } } }, 'Clear')),
+            U.el('button', { type: 'button', class: 'small', onclick: () => { if (window.confirm('Remove everything?')) { snapshot(); st.objs = []; traces.clear(); changed(); } } }, 'Clear'),
+            U.el('button', { type: 'button', class: 'small', title: 'Send the construction to Graphing as equations', onclick: toGraphing }, '📈 To Graphing')),
           el('div', { class: 'btn-row' },
             C.check({ label: 'Grid', get: () => st.grid, set: (v) => { st.grid = v; save(); requestDraw(); } }).el,
             C.check({ label: 'Snap to grid', get: () => st.snap, set: (v) => { st.snap = v; save(); } }).el)),
@@ -530,7 +714,7 @@ const Geo = (() => {
         const o = drag.o;
         if (o.type === 'onObj') { const H = G.get(o.on); if (H) o.t = Geo.paramOn(H, { x: fromPx(p.x), y: fromPy(p.y) }); }
         else { o.x = snapV(fromPx(p.x)); o.y = snapV(fromPy(p.y)); }
-        G = Geo.solve(st.objs); renderList(); requestDraw(); return;
+        G = Geo.solve(st.objs); recordTraces(); renderList(); requestDraw(); return;
       }
       if (drag && drag.kind === 'pan') { st.view.cx -= (p.x - drag.x) * st.view.s; st.view.cy += (p.y - drag.y) * st.view.s; drag.x = p.x; drag.y = p.y; requestDraw(); return; }
       const h = pick(p.x, p.y);
@@ -558,11 +742,17 @@ const Geo = (() => {
       else if (e.key === 'Escape') { pending = []; setTool('move'); }
     });
     new ResizeObserver(requestDraw).observe(cv);
+    Theme.onChange(requestDraw);
     setTool('move');
     changed();
   }
 
   Shell.register('geometry', {
+    commands: [
+      { label: 'Send the construction to Graphing', keywords: 'equations export', run: () => toGraphing() },
+      ...TOOLS.map(([t, , name, how]) => ({ label: `Geometry tool: ${name}`, keywords: how, run: () => setTool(t) })),
+      ...Object.keys(EXAMPLES).map((k) => ({ label: `Geometry example: ${k}`, keywords: 'example beispiel', run: () => { snapshot(); st.objs = []; traces.clear(); EXAMPLES[k](); st.view = { cx: 0, cy: 0, s: 0.02 }; changed(); } })),
+    ],
     label: 'Geometry', key: 5, order: 5, root: () => document.getElementById('mod-geometry'), init,
     onShow: () => requestDraw(),
     desc: 'Construct with points, lines, circles, perpendiculars, intersections, angles and polygons — drag a point and everything follows.',

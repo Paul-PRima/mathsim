@@ -56,7 +56,7 @@
           const ys = Array.from({ length: 200 }, (_, i) => fn(x0 + ((x1 - x0) * i) / 199)).filter(isFinite).sort((p, q) => p - q);
           const ylo = ys[Math.floor(ys.length * 0.05)] ?? -1, yhi = ys[Math.floor(ys.length * 0.95)] ?? 1;
           const fr = Charts.frame(cv, { xmin: x0, xmax: x1, ymin: Math.min(ylo, 0) - 1, ymax: Math.max(yhi, 0) + 1 });
-          fr.ctx.strokeStyle = '#8a90a0'; fr.ctx.beginPath(); fr.ctx.moveTo(fr.x0, fr.Y(0)); fr.ctx.lineTo(fr.x1, fr.Y(0)); fr.ctx.stroke();
+          fr.ctx.strokeStyle = Theme.muted; fr.ctx.beginPath(); fr.ctx.moveTo(fr.x0, fr.Y(0)); fr.ctx.lineTo(fr.x1, fr.Y(0)); fr.ctx.stroke();
           Charts.curve(fr, fn, x0, x1, '#4dabf7', 2);
           fr.ctx.fillStyle = '#ff922b';
           for (const r of roots) { fr.ctx.beginPath(); fr.ctx.arc(fr.X(r), fr.Y(0), 4, 0, Math.PI * 2); fr.ctx.fill(); }
@@ -182,7 +182,7 @@
           ctx.beginPath(); ctx.moveTo(X(lo), Y(0));
           for (let i = 0; i <= 200; i++) { const t = lo + ((hi - lo) * i) / 200, y = f(t); ctx.lineTo(X(t), Y(isFinite(y) ? y : 0)); }
           ctx.lineTo(X(hi), Y(0)); ctx.fill();
-          ctx.strokeStyle = '#8a90a0'; ctx.beginPath(); ctx.moveTo(fr.x0, Y(0)); ctx.lineTo(fr.x1, Y(0)); ctx.stroke();
+          ctx.strokeStyle = Theme.muted; ctx.beginPath(); ctx.moveTo(fr.x0, Y(0)); ctx.lineTo(fr.x1, Y(0)); ctx.stroke();
           ctx.restore();
           Charts.curve(fr, f, x0, x1, '#4dabf7', 2.2);
           if (isFinite(fa) && isFinite(s1)) {
@@ -290,10 +290,10 @@
       const Q = P.map(([x, y]) => [ox + x * sc, oy - y * sc]);
       ctx.fillStyle = 'rgba(77,171,247,0.18)'; ctx.strokeStyle = '#4dabf7'; ctx.lineWidth = 2;
       ctx.beginPath(); Q.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#e8eaf0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = Theme.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const cx = (Q[0][0] + Q[1][0] + Q[2][0]) / 3, cy = (Q[0][1] + Q[1][1] + Q[2][1]) / 3;
       ['A', 'B', 'C'].forEach((n, i) => { const dx = Q[i][0] - cx, dy = Q[i][1] - cy, d = Math.hypot(dx, dy) || 1; ctx.fillText(n, Q[i][0] + (dx / d) * 14, Q[i][1] + (dy / d) * 14); });
-      ctx.fillStyle = '#8a90a0';
+      ctx.fillStyle = Theme.muted;
       [['a', 1, 2], ['b', 0, 2], ['c', 0, 1]].forEach(([n, i, j]) => {
         const mx = (Q[i][0] + Q[j][0]) / 2, my = (Q[i][1] + Q[j][1]) / 2, dx = mx - cx, dy = my - cy, d = Math.hypot(dx, dy) || 1;
         ctx.fillText(n, mx + (dx / d) * 12, my + (dy / d) * 12);
@@ -620,6 +620,7 @@
     }
     let rt = 0;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => grid.querySelectorAll('.tool-card').forEach((c) => c._update && c._update()), 120); }).observe(grid);
+    Theme.onChange(() => grid.querySelectorAll('.tool-card').forEach((c) => c._update && c._update()));
   }
 
   Shell.register('tools', {

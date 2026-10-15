@@ -70,7 +70,7 @@ const Charts = (() => {
         ctx.fillText(tickLabel(v, xt.step), x, y1 + 6);
       }
     }
-    ctx.strokeStyle = '#3d4353';
+    ctx.strokeStyle = Theme.frame;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
     ctx.fillStyle = muted;
     if (xlabel) { ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(xlabel, (x0 + x1) / 2, h - 4); }

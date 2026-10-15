@@ -93,7 +93,7 @@ const Sims = (() => {
     function draw() {
       fit();
       const { ctx, w: cw, h: ch } = Charts.setup(cv);
-      ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, 0, cw, ch);
+      ctx.fillStyle = Theme.bg; ctx.fillRect(0, 0, cw, ch);
       ctx.fillStyle = '#51cf66';
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (grid[y * w + x]) ctx.fillRect(x * cell, y * cell, cell - 1, cell - 1);
       let pop = 0; for (let i = 0; i < grid.length; i++) pop += grid[i];
@@ -135,7 +135,7 @@ const Sims = (() => {
     const maxRows = () => Math.max(10, Math.floor(cv.clientHeight / cell));
     function draw() {
       const { ctx, w, h } = Charts.setup(cv);
-      ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = Theme.bg; ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#ffc078';
       rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x]) ctx.fillRect(x * cell, y * cell, cell, cell); });
       // the rule's lookup table, drawn small in the corner
@@ -143,8 +143,8 @@ const Sims = (() => {
       ctx.font = '10px ui-monospace, monospace';
       for (let i = 7; i >= 0; i--) {
         const x = bx + (7 - i) * 34;
-        for (let b = 0; b < 3; b++) { ctx.fillStyle = (i >> (2 - b)) & 1 ? '#ffc078' : '#2a2f3c'; ctx.fillRect(x + b * 9, by, 8, 8); }
-        ctx.fillStyle = (rule >> i) & 1 ? '#ffc078' : '#2a2f3c'; ctx.fillRect(x + 9, by + 10, 8, 8);
+        for (let b = 0; b < 3; b++) { ctx.fillStyle = (i >> (2 - b)) & 1 ? '#ffc078' : Theme.frame; ctx.fillRect(x + b * 9, by, 8, 8); }
+        ctx.fillStyle = (rule >> i) & 1 ? '#ffc078' : Theme.frame; ctx.fillRect(x + 9, by + 10, 8, 8);
       }
     }
     let started = false;
@@ -196,7 +196,7 @@ const Sims = (() => {
         else if (ch === '[') stack.push([x, y, dir]); else if (ch === ']' && stack.length) [x, y, dir] = stack.pop();
       }
       const { ctx, w, h } = Charts.setup(cv);
-      ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = Theme.bg; ctx.fillRect(0, 0, w, h);
       const sc = Math.min((w - 30) / ((maxX - minX) || 1), (h - 30) / ((maxY - minY) || 1));
       const ox = (w - (maxX + minX) * sc) / 2, oy = (h + (maxY + minY) * sc) / 2;
       const n = segs.length / 5, upto = Math.floor(n * progress);
@@ -313,7 +313,7 @@ const Sims = (() => {
     function draw() {
       const N = size * size, pr = Sims.sieve(N + 2);
       const { ctx, w, h } = Charts.setup(cv);
-      ctx.fillStyle = '#0c0e13'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = Theme.bg; ctx.fillRect(0, 0, w, h);
       const c = Math.min(w, h) / size, ox = (w - c * size) / 2 + (size >> 1) * c, oy = (h - c * size) / 2 + (size >> 1) * c;
       layout = { c, ox, oy };
       const euler = new Set();
@@ -326,9 +326,9 @@ const Sims = (() => {
         let col = null;
         if (mode === 'divisors') { const d = Math.min(divs[n], 48); col = `hsl(${220 - d * 4}, 70%, ${12 + d * 1.6}%)`; }
         else if (pr[n]) {
-          if (mode === 'primes') col = '#e8eaf0';
-          else if (mode === 'twin') col = pr[n + 2] || (n > 2 && pr[n - 2]) ? '#ffc078' : '#3d4353';
-          else col = euler.has(n) ? '#ff6b6b' : '#3d4353';
+          if (mode === 'primes') col = Theme.text;
+          else if (mode === 'twin') col = pr[n + 2] || (n > 2 && pr[n - 2]) ? '#ffc078' : Theme.frame;
+          else col = euler.has(n) ? '#ff6b6b' : Theme.frame;
           count++;
         }
         if (col) { ctx.fillStyle = col; ctx.fillRect(ox + x * c, oy - y * c, Math.max(1, c), Math.max(1, c)); }
@@ -409,6 +409,7 @@ const Sims = (() => {
         body)));
     show(st.tab);
     new ResizeObserver(() => active && active.draw()).observe(body);
+    Theme.onChange(() => active && active.draw());
   }
 
   Shell.register('simulations', {
