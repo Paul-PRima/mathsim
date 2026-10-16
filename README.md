@@ -27,9 +27,12 @@ A workbench for mathematics. Sections (switch with the rail on the left; Ctrl+1 
 - **Practice** — endless generated exercises on 15 topics (incl. trigonometry, logarithms, integrals, vectors and
   word problems) in English or German, with worked solutions, a progress chart, **review of weak topics** and
   **printable worksheets with answer keys** (PDF).
-- **Simulations** — patterns (Game of Life, 1D automata, L-systems, reaction–diffusion, Ulam spiral), physics
-  (**pendulum and chaotic double pendulum, projectile with air resistance, Kepler orbits**), **Fourier epicycles**
-  (draw a shape, circles redraw it) and algorithms (**seven sorting algorithms, BFS / Dijkstra / A* path finding**).
+- **Simulations** (23) — patterns (Game of Life, 1D automata, L-systems, reaction–diffusion, Ulam spiral, **flocking
+  birds, Langton's ant, sandpile avalanches, crystal growth by diffusion**), physics (pendulums, projectile, Kepler
+  orbits, **n-body gravity with the figure-eight and Lagrange points, a ripple tank with double-slit interference, an
+  ideal gas with Maxwell–Boltzmann speeds and Brownian motion**, Fourier epicycles), models (**SIR epidemic,
+  predator & prey, the logistic map with cobweb and bifurcation diagram**) and algorithms (sorting, path finding,
+  **travelling salesman with 2-opt / simulated annealing, convex hull**).
 - **Fractals** — escape-time fractals with unlimited deep zoom, complex functions (domain colouring), strange
   attractors and bifurcation diagrams, IFS flames, vector fractals, ray-marched 3D fractals, zoom videos.
 

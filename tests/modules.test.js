@@ -138,4 +138,63 @@ module.exports = (t) => {
     let ms; for (ms of Sims.gridSearch(m, 21, 15, 22, 21 * 13 + 19, 'bfs'));
     t.ok('maze: corners connected', ms.path.length > 0);
   }
+
+  // ---- more simulations: sandpile, gravity, populations, logistic map, salesman, convex hull
+  {
+    const N = 21, g = new Uint32Array(N * N), c = 10 * N + 10;
+    Sims.sandpileAdd(g, N, N, c, 300);
+    t.ok('sandpile: stable afterwards', g.every((v) => v < 4));
+    t.eq('sandpile: no grains lost while far from the edge', g.reduce((a, b) => a + b, 0), 300);
+    const sym = g[c - 3] === g[c + 3] && g[c - 3 * N] === g[c + 3 * N];
+    t.ok('sandpile: symmetric around the drop point', sym);
+    const g2 = new Uint32Array(N * N).fill(3), top = Sims.sandpileAdd(g2, N, N, c, 1);
+    t.ok('sandpile: all-3 table gives a huge avalanche', top > N * N);
+  }
+  {
+    const v = [0.46620368, 0.43236573];
+    const B = [{ x: 0.97000436, y: -0.24308753, vx: v[0], vy: v[1], m: 1 }, { x: -0.97000436, y: 0.24308753, vx: v[0], vy: v[1], m: 1 }, { x: 0, y: 0, vx: -2 * v[0], vy: -2 * v[1], m: 1 }];
+    const E0 = Sims.nbodyEnergy(B), T = 6.32591398, n = 20000;
+    for (let i = 0; i < n; i++) Sims.nbodyStep(B, T / n);
+    t.near('figure-eight returns after one period', Math.hypot(B[0].x - 0.97000436, B[0].y + 0.24308753), 0, 1e-3);
+    t.near('n-body energy conserved', Sims.nbodyEnergy(B), E0, 1e-6);
+  }
+  {
+    const p = { a: 1.1, b: 0.04, c: 0.4, d: 0.01 }, f = Sims.lotka(p);
+    const V = ([x, y]) => p.d * x - p.c * Math.log(x) + p.b * y - p.a * Math.log(y);
+    let y = [60, 10];
+    const V0 = V(y);
+    for (let i = 0; i < 5000; i++) y = Sims.rk4(f, y, 0.01);
+    t.near('Lotka–Volterra keeps its conserved quantity', V(y), V0, 1e-6);
+    let z = [60, 10];
+    const fK = Sims.lotka({ ...p, K: 400 });
+    for (let i = 0; i < 200000; i++) z = Sims.rk4(fK, z, 0.01);
+    t.near('with limited food: settles at the balance point', z[0], 40, 1e-3);
+  }
+  t.eq('logistic map r = 2.8: one value', Sims.logisticPeriod(2.8), 1);
+  t.eq('logistic map r = 3.2: 2-cycle', Sims.logisticPeriod(3.2), 2);
+  t.eq('logistic map r = 3.5: 4-cycle', Sims.logisticPeriod(3.5), 4);
+  t.eq('logistic map r = 3.83: 3-cycle', Sims.logisticPeriod(3.83), 3);
+  t.eq('logistic map r = 3.9: chaos', Sims.logisticPeriod(3.9), 0);
+  t.ok('Lyapunov exponent > 0 in chaos, < 0 when periodic', Sims.lyapunov(3.9) > 0 && Sims.lyapunov(3.2) < 0);
+  {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const P = Array.from({ length: 40 }, () => [rnd(), rnd()]), tour = P.map((_, i) => i);
+    const L0 = Sims.tourLength(P, tour);
+    let L = L0, worse = false;
+    for (let i = 0; i < 20000; i++) { const d = Sims.twoOptMove(P, tour, 0, rnd); if (d > 0) worse = true; L += d; }
+    t.ok('2-opt never makes the tour longer', !worse);
+    t.near('2-opt bookkeeping matches the real length', L, Sims.tourLength(P, tour), 1e-9);
+    t.ok('2-opt shortens a random tour a lot', L < L0 * 0.5);
+    t.eq('tour still visits every city once', [...tour].sort((a, b) => a - b).join(), P.map((_, i) => i).join());
+    t.ok('nearest neighbour tour is a permutation', new Set(Sims.nearestTour(P)).size === P.length);
+    const sq = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    t.near('tour length of a square', Sims.tourLength(sq, [0, 1, 2, 3]), 4, 1e-12);
+    const hullOf = (name, pts) => { let last; for (const s of Sims.HULL[name](pts)) last = s; return last.hull; };
+    const H1 = hullOf('jarvis', P), H2 = hullOf('monotone', P);
+    t.eq('both hull algorithms find the same corners', [...H1].sort((a, b) => a - b).join(), [...H2].sort((a, b) => a - b).join());
+    const box = [[0, 0], [2, 0], [2, 2], [0, 2], [1, 1], [0.5, 1.2], [1.5, 0.3]];
+    t.eq('hull of a square with inner points', [...hullOf('monotone', box)].sort().join(), '0,1,2,3');
+    t.eq('gift wrapping on the same square', [...hullOf('jarvis', box)].sort().join(), '0,1,2,3');
+  }
 };

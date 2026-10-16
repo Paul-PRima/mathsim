@@ -282,7 +282,146 @@ const Sims = (() => {
     for (let k = 0; k < (w * h) / 40; k++) { const x = 1 + Math.floor(rnd() * (w - 2)), y = 1 + Math.floor(rnd() * (h - 2)); if ((x + y) % 2 === 1) grid[y * w + x] = 0; }
     return grid;
   }
-  return { parseRule, lifeStep, rowStep, expand, sieve, ulamXY, rk4, pendulum, pendulumPeriod, doublePendulum, doubleEnergy, projectile, orbitElements, dft, epicycleAt, resample, SORTS, gridSearch, maze };
+
+  // ---- Abelian sandpile: add n grains to cell i, then topple every cell with 4 or more (one grain to each
+  // neighbour; grains falling off the edge are lost). Returns the number of topplings (the avalanche size).
+  function sandpileAdd(g, w, h, i, n = 1) {
+    g[i] += n;
+    if (g[i] < 4) return 0;
+    const stack = [i];
+    let topples = 0;
+    while (stack.length) {
+      const j = stack.pop();
+      if (g[j] < 4) continue;
+      const k = g[j] >> 2;
+      g[j] -= 4 * k; topples += k;
+      const x = j % w, y = (j - x) / w;
+      if (x > 0) { g[j - 1] += k; if (g[j - 1] >= 4) stack.push(j - 1); }
+      if (x < w - 1) { g[j + 1] += k; if (g[j + 1] >= 4) stack.push(j + 1); }
+      if (y > 0) { g[j - w] += k; if (g[j - w] >= 4) stack.push(j - w); }
+      if (y < h - 1) { g[j + w] += k; if (g[j + w] >= 4) stack.push(j + w); }
+    }
+    return topples;
+  }
+
+  // ---- gravity: n bodies { x, y, vx, vy, m }, G = 1, softening eps; leapfrog (kick–drift–kick)
+  function nbodyAcc(B, eps) {
+    const n = B.length, a = new Float64Array(2 * n), e2 = eps * eps;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const dx = B[j].x - B[i].x, dy = B[j].y - B[i].y, d2 = dx * dx + dy * dy + e2, inv = 1 / (d2 * Math.sqrt(d2));
+      a[2 * i] += B[j].m * dx * inv; a[2 * i + 1] += B[j].m * dy * inv;
+      a[2 * j] -= B[i].m * dx * inv; a[2 * j + 1] -= B[i].m * dy * inv;
+    }
+    return a;
+  }
+  function nbodyStep(B, h, eps = 0) {
+    let a = nbodyAcc(B, eps);
+    B.forEach((b, i) => { b.vx += (a[2 * i] * h) / 2; b.vy += (a[2 * i + 1] * h) / 2; b.x += b.vx * h; b.y += b.vy * h; });
+    a = nbodyAcc(B, eps);
+    B.forEach((b, i) => { b.vx += (a[2 * i] * h) / 2; b.vy += (a[2 * i + 1] * h) / 2; });
+  }
+  function nbodyEnergy(B, eps = 0) {
+    let E = 0;
+    B.forEach((b, i) => {
+      E += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy);
+      for (let j = i + 1; j < B.length; j++) E -= (b.m * B[j].m) / Math.sqrt((B[j].x - b.x) ** 2 + (B[j].y - b.y) ** 2 + eps * eps);
+    });
+    return E;
+  }
+
+  // ---- population models
+  // Lotka–Volterra predator and prey [x = prey, y = predators]; K = carrying capacity for the prey (Infinity = none)
+  const lotka = ({ a, b, c, d, K = Infinity }) => ([x, y]) => [a * x * (1 - x / K) - b * x * y, d * x * y - c * y];
+  // logistic map x → r·x·(1 − x): settle, then look for a repeating cycle (0 = none found, i.e. chaos)
+  function logisticSettle(r, x = 0.5, n = 3000) { for (let i = 0; i < n; i++) x = r * x * (1 - x); return x; }
+  function logisticPeriod(r, maxP = 64) {
+    const x0 = logisticSettle(r);
+    let x = x0;
+    for (let p = 1; p <= maxP; p++) { x = r * x * (1 - x); if (Math.abs(x - x0) < 1e-6) return p; }
+    return 0;
+  }
+  function lyapunov(r, n = 4000) {
+    let x = logisticSettle(r, 0.5, 600), s = 0;
+    for (let i = 0; i < n; i++) { s += Math.log(Math.abs(r * (1 - 2 * x)) || 1e-12); x = r * x * (1 - x); }
+    return s / n;
+  }
+
+  // ---- travelling salesman: points [x, y], tour = list of indices
+  const dist2D = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  const tourLength = (P, t) => t.reduce((s, a, i) => s + dist2D(P[a], P[t[(i + 1) % t.length]]), 0);
+  function nearestTour(P) {
+    const n = P.length, used = new Uint8Array(n), t = n ? [0] : [];
+    if (n) used[0] = 1;
+    for (let k = 1; k < n; k++) {
+      const last = P[t[t.length - 1]];
+      let best = -1, bd = Infinity;
+      for (let j = 0; j < n; j++) if (!used[j]) { const d = dist2D(last, P[j]); if (d < bd) { bd = d; best = j; } }
+      used[best] = 1; t.push(best);
+    }
+    return t;
+  }
+  // one random 2-opt move (reverse a stretch of the tour). Improvements are always kept; with temperature T > 0 a
+  // longer tour is kept with probability e^(−Δ/T) (simulated annealing). Returns the change in length (0 = rejected).
+  function twoOptMove(P, t, T = 0, rnd = Math.random) {
+    const n = t.length;
+    if (n < 4) return 0;
+    let i = Math.floor(rnd() * n), j = Math.floor(rnd() * n);
+    if (i > j) [i, j] = [j, i];
+    if (j - i < 2 || (i === 0 && j === n - 1)) return 0;
+    const a = P[t[i]], b = P[t[i + 1]], c = P[t[j]], d = P[t[(j + 1) % n]];
+    const delta = dist2D(a, c) + dist2D(b, d) - dist2D(a, b) - dist2D(c, d);
+    if (delta < -1e-12 || (T > 0 && rnd() < Math.exp(-delta / T))) {
+      for (let lo = i + 1, hi = j; lo < hi; lo++, hi--) [t[lo], t[hi]] = [t[hi], t[lo]];
+      return delta;
+    }
+    return 0;
+  }
+
+  // ---- convex hull, as generators that yield every step for the animation
+  const cross3 = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const HULL = {
+    // gift wrapping: from the leftmost point, repeatedly find the point that has every other point on its left
+    *jarvis(P) {
+      const n = P.length;
+      if (n < 3) { yield { hull: P.map((_, i) => i), done: true }; return; }
+      let start = 0;
+      for (let i = 1; i < n; i++) if (P[i][0] < P[start][0] || (P[i][0] === P[start][0] && P[i][1] < P[start][1])) start = i;
+      const hull = [];
+      let p = start;
+      do {
+        hull.push(p);
+        let q = (p + 1) % n;
+        for (let r = 0; r < n; r++) {
+          if (r === p) continue;
+          yield { chain: hull.slice(), from: p, cand: q, check: r };
+          const c = cross3(P[p], P[q], P[r]);
+          if (c < 0 || (c === 0 && dist2D(P[p], P[r]) > dist2D(P[p], P[q]))) q = r;
+        }
+        p = q;
+      } while (p !== start && hull.length <= n);
+      yield { hull, done: true };
+    },
+    // monotone chain: sort by x, build the lower and the upper hull, dropping points that make a right turn
+    *monotone(P) {
+      const n = P.length;
+      if (n < 3) { yield { hull: P.map((_, i) => i), done: true }; return; }
+      const idx = P.map((_, i) => i).sort((a, b) => P[a][0] - P[b][0] || P[a][1] - P[b][1]);
+      const build = function* (order, base) {
+        const ch = [];
+        for (const i of order) {
+          while (ch.length >= 2 && cross3(P[ch[ch.length - 2]], P[ch[ch.length - 1]], P[i]) <= 0) { yield { chain: base.concat(ch), check: i, from: ch[ch.length - 1] }; ch.pop(); }
+          ch.push(i);
+          yield { chain: base.concat(ch), check: i };
+        }
+        return ch;
+      };
+      const lower = yield* build(idx, []);
+      const upper = yield* build(idx.slice().reverse(), lower.slice(0, -1));
+      yield { hull: lower.slice(0, -1).concat(upper.slice(0, -1)), done: true };
+    },
+  };
+  return { parseRule, lifeStep, rowStep, expand, sieve, ulamXY, rk4, pendulum, pendulumPeriod, doublePendulum, doubleEnergy, projectile, orbitElements, dft, epicycleAt, resample, SORTS, gridSearch, maze,
+    sandpileAdd, nbodyStep, nbodyEnergy, lotka, logisticSettle, logisticPeriod, lyapunov, tourLength, nearestTour, twoOptMove, HULL };
 })();
 
 (() => {
@@ -291,7 +430,11 @@ const Sims = (() => {
   const st = { tab: 'life', speed: 12,
     pend: { mode: 'single', angle: 60, L: 1.5, g: 9.81, damp: 0, time: 1 }, proj: { v0: 25, angle: 45, h0: 0, g: 9.81, drag: 0, time: 1 },
     orbit: { v: 0.85, time: 1, areas: true }, epi: { n: 40, secs: 8, circles: true, original: true },
-    sort: { algo: 'quick', input: 'random', n: 80, speed: 4 }, path: { algo: 'astar', speed: 6 } };
+    sort: { algo: 'quick', input: 'random', n: 80, speed: 4 }, path: { algo: 'astar', speed: 6 },
+    boids: { n: 150, sep: 1, align: 1, coh: 1, radius: 50, speed: 140, scare: true }, ant: { rule: 'RL', count: 1, speed: 60 }, sand: { rate: 30 }, dla: { seed: 'point', speed: 20 },
+    ripple: { mode: 'two', view: 'waves', period: 18, sep: 40, slit: 6 }, gas: { n: 300, temp: 5000, big: false, time: 1 }, grav: { preset: 'eight', time: 1, mass: 5, trails: true },
+    sir: { n: 600, radius: 12, rate: 4, recover: 10, home: 0, speed: 3, seed: 3 }, prey: { a: 1.1, b: 0.04, c: 0.4, d: 0.01, K: 400, limited: false, x0: 60, y0: 10, speed: 3 },
+    logi: { r: 3.2, x0: 0.2, speed: 4 }, tsp: { n: 60, layout: 'random', mode: '2opt', start: 'random', speed: 200 }, hull: { n: 60, layout: 'disk', algo: 'jarvis', speed: 3 } };
   const fmt = (v) => MX.fmt(+(+v).toPrecision(6));
 
   // ---------------------------------------------------------------- Game of Life (and other life-like rules)
@@ -1099,15 +1242,856 @@ const Sims = (() => {
     };
   }
 
+
+  // ---------------------------------------------------------------- shared: small pixel grids drawn scaled up
+  const RGB = (r, g, b) => ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+  const HSL = (h, s, l) => {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return RGB(Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4)));
+  };
+  const bgRGB = () => (Theme.light ? RGB(244, 245, 248) : RGB(14, 16, 22));
+  function pixGrid(w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d'), img = g.createImageData(w, h);
+    return { w, h, c, px: new Uint32Array(img.data.buffer), put: () => g.putImageData(img, 0, 0) };
+  }
+  function blitGrid(cv, pg, smooth = false) {
+    const { ctx, w, h } = Charts.setup(cv);
+    const s = Math.min(w / pg.w, h / pg.h), ox = (w - pg.w * s) / 2, oy = (h - pg.h * s) / 2;
+    pg.put();
+    ctx.imageSmoothingEnabled = smooth;
+    ctx.drawImage(pg.c, ox, oy, pg.w * s, pg.h * s);
+    return { ctx, s, ox, oy, w, h };
+  }
+  const gridCell = (cv, lay, e) => { const [x, y] = canvasXY(cv, e); return [Math.floor((x - lay.ox) / lay.s), Math.floor((y - lay.oy) / lay.s)]; };
+  const check = (label, get, set) => { const b = el('input', { type: 'checkbox' }); b.checked = get(); b.addEventListener('change', () => set(b.checked)); return el('label', { class: 'check' }, b, el('span', {}, label)); };
+  const choose = (options, get, set) => { const s = el('select', {}, options.map(([v, l]) => el('option', { value: v }, l))); s.value = get(); s.addEventListener('change', () => set(s.value)); return s; };
+
+  // ---------------------------------------------------------------- flocking (boids)
+  function boidsTab() {
+    const B = st.boids;
+    let boids = [], W = 800, H = 460, mouse = null;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    function reset() {
+      boids = Array.from({ length: B.n }, () => { const a = Math.random() * 2 * Math.PI; return { x: Math.random() * W, y: Math.random() * H, vx: Math.cos(a) * B.speed, vy: Math.sin(a) * B.speed }; });
+      draw();
+    }
+    const wrapD = (d, L) => (d > L / 2 ? d - L : d < -L / 2 ? d + L : d);
+    function step(dt = 1 / 60) {
+      dt = Math.min(dt, 0.05);
+      const R = B.radius, R2 = R * R, sepR = R * 0.45, n = boids.length, acc = new Float32Array(2 * n);
+      for (let i = 0; i < n; i++) {
+        const b = boids[i];
+        let cnt = 0, sx = 0, sy = 0, vx = 0, vy = 0, cx = 0, cy = 0;
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          const o = boids[j], dx = wrapD(o.x - b.x, W), dy = wrapD(o.y - b.y, H), d2 = dx * dx + dy * dy;
+          if (d2 > R2) continue;
+          cnt++; vx += o.vx; vy += o.vy; cx += dx; cy += dy;
+          const d = Math.sqrt(d2) || 1e-3;
+          if (d < sepR) { const k = (1 - d / sepR) / d; sx -= dx * k; sy -= dy * k; }
+        }
+        let fx = sx * 900 * B.sep, fy = sy * 900 * B.sep;
+        if (cnt) {
+          fx += (vx / cnt - b.vx) * 3 * B.align + (cx / cnt) * 2.5 * B.coh;
+          fy += (vy / cnt - b.vy) * 3 * B.align + (cy / cnt) * 2.5 * B.coh;
+        }
+        if (mouse && B.scare) {
+          const dx = wrapD(b.x - mouse[0], W), dy = wrapD(b.y - mouse[1], H), d = Math.hypot(dx, dy) || 1;
+          if (d < 120) { fx += (dx / d) * 2400 * (1 - d / 120); fy += (dy / d) * 2400 * (1 - d / 120); }
+        }
+        acc[2 * i] = fx; acc[2 * i + 1] = fy;
+      }
+      boids.forEach((b, i) => {
+        b.vx += acc[2 * i] * dt; b.vy += acc[2 * i + 1] * dt;
+        const s = Math.hypot(b.vx, b.vy) || 1, want = Math.min(Math.max(s, B.speed * 0.6), B.speed * 1.4);
+        b.vx *= want / s; b.vy *= want / s;
+        b.x = (b.x + b.vx * dt + W) % W; b.y = (b.y + b.vy * dt + H) % H;
+      });
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv);
+      if (Math.abs(w - W) > 1 || Math.abs(h - H) > 1) { for (const b of boids) { b.x *= w / W; b.y *= h / H; } W = w; H = h; }
+      let sx = 0, sy = 0, ss = 0;
+      for (const b of boids) {
+        const a = Math.atan2(b.vy, b.vx);
+        sx += b.vx; sy += b.vy; ss += Math.hypot(b.vx, b.vy);
+        ctx.fillStyle = `hsl(${(a * 180) / Math.PI + 180}, 70%, ${Theme.light ? 42 : 62}%)`;
+        ctx.beginPath();
+        ctx.moveTo(b.x + Math.cos(a) * 8, b.y + Math.sin(a) * 8);
+        ctx.lineTo(b.x + Math.cos(a + 2.5) * 5, b.y + Math.sin(a + 2.5) * 5);
+        ctx.lineTo(b.x + Math.cos(a - 2.5) * 5, b.y + Math.sin(a - 2.5) * 5);
+        ctx.fill();
+      }
+      if (mouse && B.scare) { ctx.strokeStyle = 'rgba(255,107,107,0.5)'; ctx.beginPath(); ctx.arc(mouse[0], mouse[1], 120, 0, Math.PI * 2); ctx.stroke(); }
+      statsEl.replaceChildren(stat(I18n.t('birds'), String(boids.length)), stat(I18n.t('average speed'), f4(ss / (boids.length || 1)) + ' px/s'),
+        stat(I18n.t('alignment (1 = all fly the same way)'), f4(Math.hypot(sx, sy) / (ss || 1))));
+    }
+    cv.addEventListener('pointermove', (e) => { mouse = canvasXY(cv, e); if (!running) draw(); });
+    cv.addEventListener('pointerleave', () => { mouse = null; if (!running) draw(); });
+    const sliders = [slider('Birds', 10, 400, () => B.n, (v) => { B.n = Math.round(v); reset(); }, { step: 1 }), slider('Separation', 0, 3, () => B.sep, (v) => { B.sep = v; }),
+      slider('Alignment', 0, 3, () => B.align, (v) => { B.align = v; }), slider('Cohesion', 0, 3, () => B.coh, (v) => { B.coh = v; }),
+      slider('Sight radius (px)', 15, 150, () => B.radius, (v) => { B.radius = v; }), slider('Speed (px/s)', 40, 320, () => B.speed, (v) => { B.speed = v; })];
+    reset();
+    return {
+      controls: [check('Mouse scares the flock', () => B.scare, (v) => { B.scare = v; })],
+      view: el('div', {}, cv, el('div', { class: 'grid3' }, sliders.map((s) => s.el)), statsEl,
+        el('p', { class: 'hint' }, 'Each bird follows three local rules — keep a little distance (separation), fly like your neighbours (alignment) and stay close to them (cohesion). Nobody leads, yet flocks form, split and merge. Set a rule to 0 to see what it does. Move the mouse over the picture to play the hawk.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- Langton's ant (and other turmites)
+  const ANT_RULES = [['RL', "Langton's ant (RL)"], ['RLR', 'RLR — chaotic growth'], ['LLRR', 'LLRR — symmetric'], ['LRRRRRLLR', 'LRRRRRLLR — square'],
+    ['LLRRRLRLRLLR', 'LLRRRLRLRLLR — convoluted'], ['RRLLLRLLLRRR', 'RRLLLRLLLRRR — triangle']];
+  function antTab() {
+    const A = st.ant, W = 240, H = 150, pg = pixGrid(W, H);
+    let grid, ants, steps, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    function reset() {
+      grid = new Uint8Array(W * H); steps = 0;
+      ants = Array.from({ length: A.count }, (_, i) => ({ x: Math.round(W / 2 + (i - (A.count - 1) / 2) * 14), y: Math.round(H / 2), d: 0 }));
+      draw();
+    }
+    const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+    function step() {
+      const rule = A.rule, k = rule.length;
+      for (let s = 0; s < A.speed; s++) {
+        for (const a of ants) {
+          const i = a.y * W + a.x, c = grid[i], t = rule[c];
+          a.d = (a.d + (t === 'R' ? 1 : t === 'L' ? 3 : t === 'U' ? 2 : 0)) % 4;
+          grid[i] = (c + 1) % k;
+          a.x = (a.x + DX[a.d] + W) % W; a.y = (a.y + DY[a.d] + H) % H;
+        }
+        steps++;
+      }
+    }
+    function draw() {
+      const k = A.rule.length, cols = Array.from({ length: k }, (_, i) => (i === 0 ? bgRGB() : HSL(200 + (i - 1) * (300 / Math.max(1, k - 1)), 70, Theme.light ? 45 : 60)));
+      for (let i = 0; i < W * H; i++) pg.px[i] = cols[grid[i]];
+      for (const a of ants) pg.px[a.y * W + a.x] = RGB(255, 80, 80);
+      lay = blitGrid(cv, pg);
+      statsEl.replaceChildren(stat(I18n.t('steps'), String(steps)), stat(I18n.t('ants'), String(ants.length)), stat(I18n.t('rule'), A.rule), stat(I18n.t('colours'), String(k)));
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (!lay) return;
+      const [x, y] = gridCell(cv, lay, e);
+      if (x >= 0 && y >= 0 && x < W && y < H) { ants.push({ x, y, d: Math.floor(Math.random() * 4) }); draw(); }
+    });
+    const custom = el('input', { type: 'text', class: 'mono', value: A.rule, title: 'L = turn left, R = turn right, N = straight on, U = turn around', style: 'width:140px' });
+    custom.addEventListener('change', () => { const r = custom.value.toUpperCase().replace(/[^LRNU]/g, ''); if (r.length >= 2) { A.rule = r; preset.value = ANT_RULES.some(([k]) => k === r) ? r : ''; reset(); } });
+    const preset = choose([['', 'Custom…'], ...ANT_RULES], () => A.rule, (v) => { if (v) { A.rule = v; custom.value = v; reset(); } });
+    const count = choose([1, 2, 3, 4].map((n) => [n, n === 1 ? '1 ant' : `${n} ants`]), () => A.count, (v) => { A.count = +v; reset(); });
+    const speed = slider('Steps per frame', 1, 5000, () => A.speed, (v) => { A.speed = Math.round(v); }, { log: true, step: 1 });
+    reset();
+    return {
+      controls: [preset, custom, count],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, speed.el, el('div')), statsEl,
+        el('p', { class: 'hint' }, 'The ant turns right on a white cell and left on a coloured one, flips the colour and steps forward. After about 10 000 steps of chaos it suddenly builds a straight “highway” — nobody has proved that it always will. Longer rules (one letter per colour) build other shapes. Click to add an ant.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => speed.sync(),
+    };
+  }
+
+  // ---------------------------------------------------------------- sandpile
+  function sandTab() {
+    const P = st.sand, N = 151, pg = pixGrid(N, N), centre = ((N - 1) / 2) * N + (N - 1) / 2;
+    let g, added, topples, last, biggest, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    function reset() { g = new Uint32Array(N * N); added = 0; topples = 0; last = 0; biggest = 0; draw(); }
+    const drop = (i, n) => { last = Sims.sandpileAdd(g, N, N, i, n); added += n; topples += last; biggest = Math.max(biggest, last); };
+    const step = () => drop(centre, P.rate);
+    function draw() {
+      const cols = [bgRGB(), RGB(77, 171, 247), RGB(252, 196, 25), RGB(255, 107, 107)];
+      let on = 0;
+      for (let i = 0; i < N * N; i++) { on += g[i]; pg.px[i] = cols[Math.min(3, g[i])]; }
+      lay = blitGrid(cv, pg);
+      statsEl.replaceChildren(stat(I18n.t('grains dropped'), String(added)), stat(I18n.t('grains on the table'), String(on)), stat(I18n.t('last avalanche (topplings)'), String(last)),
+        stat(I18n.t('biggest avalanche'), String(biggest)), stat(I18n.t('topplings in total'), String(topples)));
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (!lay) return;
+      const [x, y] = gridCell(cv, lay, e);
+      if (x >= 0 && y >= 0 && x < N && y < N) { drop(y * N + x, 2000); draw(); }
+    });
+    const rate = slider('Grains per frame', 1, 2000, () => P.rate, (v) => { P.rate = Math.round(v); }, { log: true, step: 1 });
+    reset();
+    return {
+      controls: [U.el('button', { type: 'button', class: 'small', onclick: () => { drop(centre, 20000); draw(); } }, '+20 000 grains'),
+        U.el('button', { type: 'button', class: 'small', title: 'Every cell holds 3 grains — one more grain anywhere sets off a huge avalanche', onclick: () => { g.fill(3); draw(); } }, 'Make every cell 3')],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, rate.el, el('div')), statsEl,
+        el('p', { class: 'hint' }, 'Grains fall on the middle cell. A cell with 4 grains topples and gives one to each neighbour, which may topple too. The pile organises itself into a delicate fractal and stays “critical”: most grains do nothing, a few start avalanches of every size (self-organised criticality). Colours: 0 · 1 blue · 2 yellow · 3 red. Click to drop 2000 grains anywhere.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => rate.sync(),
+    };
+  }
+
+  // ---------------------------------------------------------------- diffusion-limited aggregation
+  function dlaTab() {
+    const P = st.dla, W = 300, H = 200, pg = pixGrid(W, H);
+    let stuck, order, count, walker, maxR, top, done, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    const cx = W >> 1, cy = H >> 1;
+    const set = (x, y) => {
+      const i = y * W + x;
+      stuck[i] = 1; order[i] = ++count;
+      if (P.seed === 'point') maxR = Math.max(maxR, Math.hypot(x - cx, y - cy)); else top = Math.min(top, y);
+    };
+    function reset() {
+      stuck = new Uint8Array(W * H); order = new Uint32Array(W * H); count = 0; maxR = 1; top = H - 1; walker = null; done = false;
+      if (P.seed === 'point') set(cx, cy); else for (let x = 0; x < W; x++) set(x, H - 1);
+      draw();
+    }
+    const launch = () => {
+      if (P.seed === 'point') { const a = Math.random() * 2 * Math.PI, r = maxR + 6; return { x: Math.round(cx + r * Math.cos(a)), y: Math.round(cy + r * Math.sin(a)) }; }
+      return { x: Math.floor(Math.random() * W), y: Math.max(0, top - 8) };
+    };
+    const touches = (x, y) => {
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if ((dx || dy) && nx >= 0 && ny >= 0 && nx < W && ny < H && stuck[ny * W + nx]) return true;
+      }
+      return false;
+    };
+    function step() {
+      if (done) return;
+      for (let budget = P.speed * 2000; budget > 0; budget--) {
+        if (!walker) walker = launch();
+        const d = Math.floor(Math.random() * 4);
+        walker.x += d === 0 ? 1 : d === 1 ? -1 : 0; walker.y += d === 2 ? 1 : d === 3 ? -1 : 0;
+        if (P.seed === 'point') {
+          if (walker.x < 1 || walker.y < 1 || walker.x >= W - 1 || walker.y >= H - 1 || Math.hypot(walker.x - cx, walker.y - cy) > maxR * 2 + 20) { walker = null; continue; }
+        } else {
+          walker.x = (walker.x + W) % W;
+          if (walker.y < Math.max(0, top - 30) || walker.y >= H) { walker = null; continue; }
+        }
+        if (touches(walker.x, walker.y)) {
+          set(walker.x, walker.y); walker = null;
+          if ((P.seed === 'point' && maxR > Math.min(W, H) / 2 - 4) || (P.seed !== 'point' && top <= 2)) { done = true; pause(); return; }
+        }
+      }
+    }
+    function draw() {
+      const bg = bgRGB();
+      for (let i = 0; i < W * H; i++) pg.px[i] = stuck[i] ? HSL(190 + (order[i] / count) * 150, 75, Theme.light ? 45 : 60) : bg;
+      if (walker) pg.px[walker.y * W + walker.x] = RGB(255, 255, 255);
+      lay = blitGrid(cv, pg);
+      const size = P.seed === 'point' ? maxR : H - 1 - top;
+      statsEl.replaceChildren(stat(I18n.t('particles'), String(count)), stat(I18n.t(P.seed === 'point' ? 'radius' : 'height'), f4(size)),
+        ...(P.seed === 'point' ? [stat(I18n.t('fractal dimension ≈ ln N / ln r'), count > 50 ? f4(Math.log(count) / Math.log(maxR)) : '—')] : []), stat(I18n.t('status'), I18n.t(done ? 'finished' : 'growing')));
+    }
+    const seed = choose([['point', 'Grow from a point'], ['line', 'Grow up from the ground']], () => P.seed, (v) => { P.seed = v; reset(); });
+    const speed = slider('Speed', 1, 100, () => P.speed, (v) => { P.speed = Math.round(v); }, { log: true, step: 1 });
+    reset();
+    return {
+      controls: [seed],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, speed.el, el('div')), statsEl,
+        el('p', { class: 'hint' }, 'Particles wander about at random until they touch the cluster and stick. Tips stick out further and catch more particles, so branches grow and inner gaps stay empty: the result looks like frost, lightning or coral, with fractal dimension about 1.71. Colour shows when each particle arrived.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => speed.sync(),
+    };
+  }
+
+  // ---------------------------------------------------------------- ripple tank (2D wave equation)
+  function rippleTab() {
+    const P = st.ripple, W = 240, H = 150, pg = pixGrid(W, H), C2 = 0.3;
+    let u0, u1, avg, wall, damp, t, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    function reset() {
+      u0 = new Float32Array(W * H); u1 = new Float32Array(W * H); avg = new Float32Array(W * H); wall = new Uint8Array(W * H); damp = new Float32Array(W * H); t = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { // absorbing border
+        const e = Math.min(x, y, W - 1 - x, H - 1 - y);
+        damp[y * W + x] = e < 20 ? 1 - 0.08 * ((20 - e) / 20) ** 2 : 1;
+      }
+      if (P.mode === 'slit2' || P.mode === 'slit1') {
+        const wx = 90, open = P.mode === 'slit2' ? [H / 2 - P.sep / 2, H / 2 + P.sep / 2] : [H / 2];
+        for (let y = 0; y < H; y++) if (!open.some((c) => Math.abs(y - c) < P.slit / 2)) for (let x = wx; x < wx + 3; x++) wall[y * W + x] = 1;
+      }
+      draw();
+    }
+    function sources() {
+      if (P.mode === 'one') return [[W / 2, H / 2]];
+      if (P.mode === 'two') return [[W / 2, H / 2 - P.sep / 2], [W / 2, H / 2 + P.sep / 2]];
+      if (P.mode === 'slit1' || P.mode === 'slit2') return 'line';
+      return [];
+    }
+    function step() {
+      const src = sources(), w = (2 * Math.PI) / P.period;
+      for (let sub = 0; sub < 2; sub++) {
+        t++;
+        for (let y = 1; y < H - 1; y++) for (let x = 1, i = y * W + 1; x < W - 1; x++, i++) {
+          if (wall[i]) { u0[i] = 0; continue; }
+          const lap = u1[i - 1] + u1[i + 1] + u1[i - W] + u1[i + W] - 4 * u1[i];
+          u0[i] = (2 * u1[i] - u0[i] + C2 * lap) * damp[i];
+        }
+        [u0, u1] = [u1, u0];
+        const v = Math.sin(w * t);
+        if (src === 'line') for (let y = 1; y < H - 1; y++) u1[y * W + 22] = v;
+        else for (const [sx, sy] of src) { const i = Math.round(sy) * W + Math.round(sx); u1[i] = u1[i + 1] = u1[i + W] = u1[i + W + 1] = 2 * v; }
+        for (let i = 0; i < W * H; i++) avg[i] = avg[i] * 0.985 + u1[i] * u1[i] * 0.015;
+      }
+    }
+    function draw() {
+      const intensity = P.view === 'intensity';
+      let peak = 1e-6; // brightest spot beyond the slits (or away from the sources), so the pattern fills the colour range
+      const from = P.mode === 'slit1' || P.mode === 'slit2' ? 96 : 0, src = sources();
+      if (intensity) for (let y = 2; y < H - 2; y++) for (let x = Math.max(2, from); x < W - 2; x++) {
+        if (src !== 'line' && src.some(([sx, sy]) => Math.abs(x - sx) < 6 && Math.abs(y - sy) < 6)) continue;
+        peak = Math.max(peak, avg[y * W + x]);
+      }
+      for (let i = 0; i < W * H; i++) {
+        if (wall[i]) { pg.px[i] = Theme.light ? RGB(90, 96, 110) : RGB(150, 156, 170); continue; }
+        const s = intensity ? Math.min(1, Math.sqrt(avg[i] / peak)) * 2 - 1 : Math.max(-1, Math.min(1, u1[i] * 1.4));
+        const k = (s + 1) / 2;
+        pg.px[i] = intensity ? RGB(Math.round(20 + 235 * k ** 1.5), Math.round(25 + 200 * k ** 2), Math.round(60 + 60 * k)) : RGB(Math.round(15 + 210 * k ** 1.4), Math.round(40 + 200 * k ** 1.2), Math.round(90 + 165 * k));
+      }
+      lay = blitGrid(cv, pg, true);
+      statsEl.replaceChildren(stat(I18n.t('wavelength'), f4(Math.sqrt(C2) * P.period) + ' ' + I18n.t('cells')), stat(I18n.t('time steps'), String(t)));
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (!lay) return;
+      const [x0, y0] = gridCell(cv, lay, e);
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const x = x0 + dx, y = y0 + dy;
+        if (x > 0 && y > 0 && x < W - 1 && y < H - 1) u1[y * W + x] += 3 * Math.exp(-(dx * dx + dy * dy) / 6);
+      }
+      if (!running) setRunning(true);
+    });
+    const mode = choose([['one', 'One source'], ['two', 'Two sources (interference)'], ['slit2', 'Double slit'], ['slit1', 'Single slit'], ['drops', 'Drops only (click)']], () => P.mode, (v) => { P.mode = v; reset(); });
+    const view = choose([['waves', 'Show the waves'], ['intensity', 'Show the intensity (average energy)']], () => P.view, (v) => { P.view = v; draw(); });
+    const sliders = [slider('Period (steps per wave)', 8, 40, () => P.period, (v) => { P.period = v; }), slider('Distance between sources / slits', 8, 90, () => P.sep, (v) => { P.sep = v; reset(); }, { step: 1 }),
+      slider('Slit width', 2, 24, () => P.slit, (v) => { P.slit = v; reset(); }, { step: 1 })];
+    reset();
+    return {
+      controls: [mode, view],
+      view: el('div', {}, cv, el('div', { class: 'grid3' }, sliders.map((s) => s.el)), statsEl,
+        el('p', { class: 'hint' }, 'A water surface following the wave equation. Two sources, or the two openings of a double slit, make waves that add up where crests meet and cancel where a crest meets a trough — the striped interference pattern that proved light is a wave. “Intensity” shows the average energy, so the stripes stand still. Shorter waves or wider spacing give more stripes. Click to drop a stone.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- ideal gas
+  function gasTab() {
+    const G = st.gas, R = 3.5;
+    let ps = [], W = 800, H = 400, impulse = 0, simT = 0, colls = 0, collT = 0, trail = [];
+    const cv = el('canvas', { class: 'sim-canvas' }), hist = el('canvas', { class: 'chart' }), statsEl = el('div', { class: 'pl-stats' });
+    const kT = () => ps.reduce((s, p) => s + 0.5 * p.m * (p.vx * p.vx + p.vy * p.vy), 0) / (ps.length || 1);
+    function reset() {
+      ps = []; impulse = 0; simT = 0; colls = 0; collT = 0; trail = [];
+      if (G.big) ps.push({ x: W / 2, y: H / 2, vx: 0, vy: 0, r: 15, m: 12 });
+      const n = G.n, s = Math.sqrt((W * H) / (n * 1.15)), cols = Math.max(1, Math.floor(W / s)), v0 = Math.sqrt(2 * G.temp);
+      for (let k = 0; k < n; k++) {
+        const x = ((k % cols) + 0.5) * (W / cols) + (Math.random() - 0.5) * s * 0.3, y = (Math.floor(k / cols) + 0.5) * s + (Math.random() - 0.5) * s * 0.3;
+        if (G.big && Math.hypot(x - W / 2, y - H / 2) < 22) continue;
+        const a = Math.random() * 2 * Math.PI;
+        ps.push({ x: Math.min(W - R, Math.max(R, x)), y: Math.min(H - R, Math.max(R, y)), vx: v0 * Math.cos(a), vy: v0 * Math.sin(a), r: R, m: 1 });
+      }
+      draw();
+    }
+    const heat = (target) => { const f = Math.sqrt(target / (kT() || 1)); for (const p of ps) { p.vx *= f; p.vy *= f; } };
+    function collide(p, q) {
+      const dx = q.x - p.x, dy = q.y - p.y, rr = p.r + q.r, d2 = dx * dx + dy * dy;
+      if (d2 >= rr * rr || d2 === 0) return;
+      const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, ov = (rr - d) / 2;
+      p.x -= nx * ov; p.y -= ny * ov; q.x += nx * ov; q.y += ny * ov;
+      const rel = (p.vx - q.vx) * nx + (p.vy - q.vy) * ny;
+      if (rel <= 0) return;
+      const J = (2 * rel) / (1 / p.m + 1 / q.m);
+      p.vx -= (J / p.m) * nx; p.vy -= (J / p.m) * ny; q.vx += (J / q.m) * nx; q.vy += (J / q.m) * ny;
+      colls++;
+    }
+    function step(dt = 1 / 60) {
+      const sub = 4, h = (Math.min(dt, 0.05) * G.time) / sub, cs = 2 * R + 2, gw = Math.ceil(W / cs) + 2;
+      for (let s = 0; s < sub; s++) {
+        for (const p of ps) {
+          p.x += p.vx * h; p.y += p.vy * h;
+          if (p.x < p.r) { p.x = p.r; if (p.vx < 0) { impulse -= 2 * p.m * p.vx; p.vx = -p.vx; } }
+          if (p.x > W - p.r) { p.x = W - p.r; if (p.vx > 0) { impulse += 2 * p.m * p.vx; p.vx = -p.vx; } }
+          if (p.y < p.r) { p.y = p.r; if (p.vy < 0) { impulse -= 2 * p.m * p.vy; p.vy = -p.vy; } }
+          if (p.y > H - p.r) { p.y = H - p.r; if (p.vy > 0) { impulse += 2 * p.m * p.vy; p.vy = -p.vy; } }
+        }
+        const first = G.big ? 1 : 0, cells = new Map();
+        for (let i = first; i < ps.length; i++) { const k = Math.floor(ps[i].x / cs) + 1 + (Math.floor(ps[i].y / cs) + 1) * gw; let l = cells.get(k); if (!l) cells.set(k, (l = [])); l.push(i); }
+        for (let i = first; i < ps.length; i++) {
+          const k = Math.floor(ps[i].x / cs) + 1 + (Math.floor(ps[i].y / cs) + 1) * gw;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const l = cells.get(k + dx + dy * gw);
+            if (l) for (const j of l) if (j > i) collide(ps[i], ps[j]);
+          }
+        }
+        if (G.big) for (let j = 1; j < ps.length; j++) collide(ps[0], ps[j]);
+        simT += h; collT += h;
+      }
+      if (G.big) { trail.push([ps[0].x, ps[0].y]); if (trail.length > 4000) trail.shift(); }
+      if (simT > 8) { impulse /= 2; simT /= 2; } // a sliding average for the pressure
+      if (collT > 4) { colls /= 2; collT /= 2; }
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv);
+      if (Math.abs(w - W) > 1 || Math.abs(h - H) > 1) { for (const p of ps) { p.x *= w / W; p.y *= h / H; } trail = trail.map(([x, y]) => [(x * w) / W, (y * h) / H]); W = w; H = h; }
+      const vt = Math.sqrt(2 * (kT() || 1));
+      for (const p of ps) {
+        const sp = Math.hypot(p.vx, p.vy) / vt;
+        ctx.fillStyle = p.m > 1 ? 'rgba(255,146,43,0.55)' : `hsl(${220 - Math.min(1, sp / 2.2) * 220}, 80%, ${Theme.light ? 48 : 60}%)`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      }
+      if (trail.length > 1) { ctx.strokeStyle = Theme.light ? '#c2410c' : '#ffd8a8'; ctx.lineWidth = 1.6; ctx.beginPath(); trail.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); }
+      // speed histogram with the 2D Maxwell–Boltzmann distribution f(v) = v/σ² · e^(−v²/2σ²), σ² = kT/m
+      const small = ps.filter((p) => p.m === 1), sig2 = small.reduce((s, p) => s + p.vx * p.vx + p.vy * p.vy, 0) / (2 * (small.length || 1));
+      const vmax = 4 * Math.sqrt(sig2 || 1), bins = 30, bw = vmax / bins, counts = new Array(bins).fill(0);
+      for (const p of small) { const b = Math.floor(Math.hypot(p.vx, p.vy) / bw); if (b < bins) counts[b]++; }
+      const mb = (v) => (v / sig2) * Math.exp((-v * v) / (2 * sig2)) * small.length * bw;
+      const fr = Charts.frame(hist, { xmin: 0, xmax: vmax, ymin: 0, ymax: Math.max(...counts, mb(Math.sqrt(sig2))) * 1.15 || 1, xlabel: I18n.t('speed (px/s)'), ylabel: I18n.t('particles') });
+      counts.forEach((c, i) => { fr.ctx.fillStyle = 'rgba(77,171,247,0.7)'; fr.ctx.fillRect(fr.X(i * bw) + 1, fr.Y(c), fr.X(bw) - fr.X(0) - 2, fr.Y(0) - fr.Y(c)); });
+      fr.ctx.strokeStyle = '#ff922b'; fr.ctx.lineWidth = 2; fr.ctx.beginPath();
+      for (let k = 0; k <= 120; k++) { const v = (vmax * k) / 120; k ? fr.ctx.lineTo(fr.X(v), fr.Y(mb(v))) : fr.ctx.moveTo(fr.X(v), fr.Y(mb(v))); }
+      fr.ctx.stroke();
+      const T = kT(), Pr = simT ? impulse / simT / (2 * (W + H)) : NaN;
+      statsEl.replaceChildren(stat(I18n.t('particles'), String(ps.length)), stat(I18n.t('temperature kT = average energy'), f4(T)),
+        stat(I18n.t('pressure P'), simT ? f4(Pr) : '—'), stat('P·A / (N·kT)', simT ? f4((Pr * W * H) / (ps.length * T)) : '—'), stat(I18n.t('collisions per second'), collT ? f4(colls / collT) : '—'));
+    }
+    const sliders = [slider('Particles', 20, 800, () => G.n, (v) => { G.n = Math.round(v); reset(); }, { step: 1 }),
+      slider('Temperature', 500, 30000, () => G.temp, (v) => { G.temp = v; heat(v); }, { log: true }), slider('Time speed', 0.1, 3, () => G.time, (v) => { G.time = v; })];
+    reset();
+    return {
+      controls: [check('Big heavy particle (Brownian motion)', () => G.big, (v) => { G.big = v; reset(); }), U.el('button', { type: 'button', class: 'small', title: 'Every particle starts with the same speed', onclick: reset }, 'Restart')],
+      view: el('div', {}, cv, el('div', { class: 'grid3' }, sliders.map((s) => s.el)), hist, statsEl,
+        el('p', { class: 'hint' }, 'Hard discs bouncing off each other and the walls. They all start with the same speed, yet within seconds the speeds spread into the Maxwell–Boltzmann distribution (orange). Temperature is just the average kinetic energy; the pressure comes from the pushes on the walls, and P·A ≈ N·kT is the ideal gas law. The big particle is jostled into a random zigzag — the Brownian motion Einstein used to prove that atoms exist.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- gravity sandbox (n bodies)
+  const GRAV = {
+    eight: { name: 'Figure-eight (three bodies)', span: 1.4, time: 1, bodies: () => {
+      const v = [0.46620368, 0.43236573];
+      return [{ x: 0.97000436, y: -0.24308753, vx: v[0], vy: v[1], m: 1 }, { x: -0.97000436, y: 0.24308753, vx: v[0], vy: v[1], m: 1 }, { x: 0, y: 0, vx: -2 * v[0], vy: -2 * v[1], m: 1 }];
+    } },
+    solar: { name: 'Sun, planet and moon', span: 14, time: 1.5, bodies: () => [{ x: 0, y: 0, vx: 0, vy: -0.01, m: 1000 }, { x: 10, y: 0, vx: 0, vy: 10, m: 1 }, { x: 10.6, y: 0, vx: 0, vy: 10 + Math.sqrt(1 / 0.6), m: 0.001 }] },
+    binary: { name: 'Double star with a planet', span: 26, time: 2, bodies: () => { const v = Math.sqrt((500 * 3) / 36); return [{ x: -3, y: 0, vx: 0, vy: -v, m: 500 }, { x: 3, y: 0, vx: 0, vy: v, m: 500 }, { x: 20, y: 0, vx: 0, vy: Math.sqrt(1000 / 20), m: 0.1 }]; } },
+    lagrange: { name: 'Lagrange points (Trojans)', span: 14, time: 1.5, bodies: () => {
+      const out = [{ x: 0, y: 0, vx: 0, vy: 0, m: 1000 }, { x: 10, y: 0, vx: 0, vy: 10, m: 10 }];
+      for (const a of [Math.PI / 3, -Math.PI / 3]) out.push({ x: 10 * Math.cos(a), y: 10 * Math.sin(a), vx: -10 * Math.sin(a), vy: 10 * Math.cos(a), m: 0.001 });
+      return out;
+    } },
+    cluster: { name: 'Star cluster', span: 16, time: 1, bodies: () => {
+      const out = [];
+      for (let i = 0; i < 24; i++) { const r = 2 + Math.random() * 9, a = Math.random() * 2 * Math.PI, v = Math.sqrt((24 * 3 * (r / 11)) / r) * 0.75; out.push({ x: r * Math.cos(a), y: r * Math.sin(a), vx: -v * Math.sin(a), vy: v * Math.cos(a), m: 1 + Math.random() * 4 }); }
+      return out;
+    } },
+  };
+  function gravityTab() {
+    const P = st.grav;
+    let bodies, t, E0, eps, view, launch = null;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' });
+    const colors = ['#ffd43b', '#4dabf7', '#ff922b', '#51cf66', '#cc5de8', '#ff6b6b', '#22b8cf', '#f06595'];
+    function reset() {
+      const pr = GRAV[P.preset];
+      bodies = pr.bodies().map((b, i) => ({ ...b, trail: [], color: colors[i % colors.length] }));
+      eps = pr.span * 0.006; t = 0; E0 = Sims.nbodyEnergy(bodies, eps);
+      draw();
+    }
+    function step(dt = 1 / 60) {
+      // adaptive steps: a small fraction of the shortest orbit / fly-by time between any two bodies, so close encounters stay accurate
+      const pr = GRAV[P.preset];
+      let left = Math.min(dt, 0.05) * P.time * pr.time;
+      for (let iter = 0; left > 1e-12 && iter < 3000; iter++) {
+        let tmin = Infinity;
+        for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
+          const a = bodies[i], b = bodies[j], d2 = (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + eps * eps, v2 = (a.vx - b.vx) ** 2 + (a.vy - b.vy) ** 2;
+          tmin = Math.min(tmin, Math.sqrt(d2 ** 1.5 / (a.m + b.m)), Math.sqrt(d2 / (v2 || 1e-12)));
+        }
+        const h = Math.min(left, 0.004 * tmin);
+        Sims.nbodyStep(bodies, h, eps);
+        left -= h; t += h;
+      }
+      if (P.trails) for (const b of bodies) { b.trail.push([b.x, b.y]); if (b.trail.length > 1500) b.trail.shift(); }
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv), pr = GRAV[P.preset];
+      const M = bodies.reduce((s, b) => s + b.m, 0), cmx = bodies.reduce((s, b) => s + b.m * b.x, 0) / M, cmy = bodies.reduce((s, b) => s + b.m * b.y, 0) / M;
+      const scale = Math.min(w, h) / (2 * pr.span), ox = w / 2 - cmx * scale, oy = h / 2 + cmy * scale;
+      view = { scale, ox, oy };
+      const S = (x, y) => [ox + x * scale, oy - y * scale];
+      const maxM = Math.max(...bodies.map((b) => b.m));
+      for (const b of bodies) {
+        if (b.trail.length < 2) continue;
+        ctx.strokeStyle = b.color; ctx.globalAlpha = 0.55; ctx.lineWidth = 1.2; ctx.beginPath();
+        b.trail.forEach(([x, y], i) => (i ? ctx.lineTo(...S(x, y)) : ctx.moveTo(...S(x, y)))); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      for (const b of bodies) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(...S(b.x, b.y), 2.5 + 7 * Math.cbrt(b.m / maxM), 0, Math.PI * 2); ctx.fill(); }
+      if (launch) { ctx.strokeStyle = '#51cf66'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(...S(...launch.p)); ctx.lineTo(...S(...launch.q)); ctx.stroke(); }
+      const E = Sims.nbodyEnergy(bodies, eps);
+      statsEl.replaceChildren(stat(I18n.t('bodies'), String(bodies.length)), stat(I18n.t('time'), f4(t)), stat(I18n.t('energy drift (numerical error)'), f4((100 * (E - E0)) / Math.abs(E0 || 1)) + ' %'));
+    }
+    const toWorld = (e) => { const [x, y] = canvasXY(cv, e); return [(x - view.ox) / view.scale, -(y - view.oy) / view.scale]; };
+    cv.addEventListener('pointerdown', (e) => { if (!view) return; cv.setPointerCapture(e.pointerId); const p = toWorld(e); launch = { p, q: p }; draw(); });
+    cv.addEventListener('pointermove', (e) => { if (launch) { launch.q = toWorld(e); draw(); } });
+    cv.addEventListener('pointerup', () => {
+      if (!launch) return;
+      const { p, q } = launch, k = 1.5 / GRAV[P.preset].time;
+      launch = null;
+      bodies.push({ x: p[0], y: p[1], vx: (q[0] - p[0]) * k, vy: (q[1] - p[1]) * k, m: P.mass, trail: [], color: colors[bodies.length % colors.length] });
+      E0 = Sims.nbodyEnergy(bodies, eps);
+      if (!running) setRunning(true);
+    });
+    const preset = choose(Object.entries(GRAV).map(([k, g]) => [k, g.name]), () => P.preset, (v) => { P.preset = v; reset(); });
+    const sliders = [slider('Mass of new bodies', 0.001, 1000, () => P.mass, (v) => { P.mass = v; }, { log: true }), slider('Time speed', 0.1, 4, () => P.time, (v) => { P.time = v; })];
+    reset();
+    return {
+      controls: [preset, check('Trails', () => P.trails, (v) => { P.trails = v; if (!v) bodies.forEach((b) => (b.trail = [])); draw(); })],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, sliders.map((s) => s.el)), statsEl,
+        el('p', { class: 'hint' }, 'Every body pulls on every other with Newton’s law of gravity. Two bodies always follow ellipses, but three or more are usually chaotic — except for rare special orbits like the figure-eight found in 2000. Small bodies at the Lagrange points 60° ahead of and behind a planet ride along with it, like Jupiter’s Trojan asteroids. Drag on the picture to throw in a new body.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- epidemic (agent-based SIR)
+  function sirTab() {
+    const P = st.sir;
+    let ag = [], W = 800, H = 380, day, hist, peak, peakDay;
+    const cv = el('canvas', { class: 'sim-canvas' }), chart = el('canvas', { class: 'chart' }), statsEl = el('div', { class: 'pl-stats' });
+    function reset() {
+      day = 0; hist = []; peak = 0; peakDay = 0;
+      ag = Array.from({ length: P.n }, () => { const a = Math.random() * 2 * Math.PI; return { x: Math.random() * W, y: Math.random() * H, vx: Math.cos(a) * 40, vy: Math.sin(a) * 40, s: 0, t: 0, home: Math.random() < P.home / 100 }; });
+      for (let k = 0; k < Math.min(P.seed, ag.length); k++) ag[k].s = 1;
+      record(); draw();
+    }
+    const counts = () => { const c = [0, 0, 0]; for (const a of ag) c[a.s]++; return c; };
+    const record = () => { const [S, I, R] = counts(); hist.push([day, S, I, R]); if (I > peak) { peak = I; peakDay = day; } };
+    function step(dt = 1 / 60) {
+      dt = Math.min(dt, 0.05);
+      const dd = dt * P.speed, pInf = 1 - Math.exp(-P.rate * dd), r = P.radius, cells = new Map(), gw = Math.ceil(W / r) + 2;
+      for (const a of ag) {
+        if (a.home) continue;
+        a.x += a.vx * dt; a.y += a.vy * dt;
+        if (a.x < 0 || a.x > W) { a.vx = -a.vx; a.x = Math.min(W, Math.max(0, a.x)); }
+        if (a.y < 0 || a.y > H) { a.vy = -a.vy; a.y = Math.min(H, Math.max(0, a.y)); }
+        if (Math.random() < dt * 0.5) { const ang = Math.random() * 2 * Math.PI; a.vx = Math.cos(ang) * 40; a.vy = Math.sin(ang) * 40; }
+      }
+      ag.forEach((a, i) => { if (a.s === 0) { const k = Math.floor(a.x / r) + 1 + (Math.floor(a.y / r) + 1) * gw; let l = cells.get(k); if (!l) cells.set(k, (l = [])); l.push(i); } });
+      for (const a of ag) {
+        if (a.s !== 1) continue;
+        if (day - a.t > P.recover) { a.s = 2; continue; }
+        const k = Math.floor(a.x / r) + 1 + (Math.floor(a.y / r) + 1) * gw;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const l = cells.get(k + dx + dy * gw);
+          if (l) for (const j of l) { const b = ag[j]; if (b.s === 0 && (b.x - a.x) ** 2 + (b.y - a.y) ** 2 < r * r && Math.random() < pInf) { b.s = 1; b.t = day; } }
+        }
+      }
+      day += dd;
+      if (!hist.length || day - hist[hist.length - 1][0] >= 0.1) record();
+      if (!counts()[1]) pause();
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv);
+      if (Math.abs(w - W) > 1 || Math.abs(h - H) > 1) { for (const a of ag) { a.x *= w / W; a.y *= h / H; } W = w; H = h; }
+      const col = ['#4dabf7', '#ff6b6b', Theme.light ? '#adb5bd' : '#5c6378'];
+      for (const a of ag) {
+        if (a.s === 1) { ctx.fillStyle = 'rgba(255,107,107,0.12)'; ctx.beginPath(); ctx.arc(a.x, a.y, P.radius, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = col[a.s]; ctx.beginPath(); ctx.arc(a.x, a.y, a.home ? 2.5 : 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+      const n = ag.length, fr = Charts.frame(chart, { xmin: 0, xmax: Math.max(10, day), ymin: 0, ymax: n, xlabel: I18n.t('days'), ylabel: I18n.t('people') });
+      const area = (lo, hi, color) => {
+        fr.ctx.fillStyle = color; fr.ctx.beginPath();
+        hist.forEach((p, i) => (i ? fr.ctx.lineTo(fr.X(p[0]), fr.Y(hi(p))) : fr.ctx.moveTo(fr.X(p[0]), fr.Y(hi(p)))));
+        for (let i = hist.length - 1; i >= 0; i--) fr.ctx.lineTo(fr.X(hist[i][0]), fr.Y(lo(hist[i])));
+        fr.ctx.fill();
+      };
+      area(() => 0, (p) => p[2], 'rgba(255,107,107,0.85)');
+      area((p) => p[2], (p) => p[2] + p[1], 'rgba(77,171,247,0.6)');
+      area((p) => p[2] + p[1], () => n, Theme.light ? 'rgba(173,181,189,0.6)' : 'rgba(92,99,120,0.6)');
+      const [S, I, R] = counts();
+      statsEl.replaceChildren(stat(I18n.t('day'), f4(day)), stat(I18n.t('healthy'), String(S)), stat(I18n.t('ill'), String(I)), stat(I18n.t('recovered'), String(R)),
+        stat(I18n.t('most ill at once'), `${peak} (${I18n.t('day')} ${Math.round(peakDay)})`), stat(I18n.t('ever ill'), `${Math.round((100 * (I + R)) / (n || 1))} %`));
+    }
+    const sliders = [slider('People', 100, 1500, () => P.n, (v) => { P.n = Math.round(v); reset(); }, { step: 1 }), slider('Staying at home (%)', 0, 95, () => P.home, (v) => { P.home = v; reset(); }, { step: 1 }),
+      slider('Infection distance (px)', 4, 30, () => P.radius, (v) => { P.radius = v; }), slider('Infection rate (per contact-day)', 0.1, 10, () => P.rate, (v) => { P.rate = v; }, { log: true }),
+      slider('Days until recovered', 2, 30, () => P.recover, (v) => { P.recover = v; }), slider('Days per second', 0.5, 10, () => P.speed, (v) => { P.speed = v; })];
+    reset();
+    return {
+      controls: [U.el('button', { type: 'button', class: 'small', onclick: reset }, 'Restart')],
+      view: el('div', {}, cv, el('div', { class: 'grid3' }, sliders.map((s) => s.el)), chart, statsEl,
+        el('p', { class: 'hint' }, 'Blue people are healthy, red ones ill (they infect anyone close enough), grey ones recovered and immune. The chart stacks ill (red), healthy (blue) and recovered (grey). When many people stay at home the curve is “flattened”: fewer are ill at the same time and often not everyone catches it at all. This is the SIR model, simulated person by person.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- predator and prey (Lotka–Volterra)
+  function preyTab() {
+    const P = st.prey;
+    let y, t, hist, map;
+    const ts = el('canvas', { class: 'chart' }), ph = el('canvas', { class: 'chart tall' }), statsEl = el('div', { class: 'pl-stats' });
+    const params = () => ({ a: P.a, b: P.b, c: P.c, d: P.d, K: P.limited ? P.K : Infinity });
+    function reset(start) { y = start || [P.x0, P.y0]; t = 0; hist = [[0, y[0], y[1]]]; draw(); }
+    function step(dt = 1 / 60) {
+      const f = Sims.lotka(params()), h = 0.01, n = Math.max(1, Math.round((Math.min(dt, 0.05) * P.speed) / h));
+      for (let i = 0; i < n; i++) { y = Sims.rk4(f, y, h).map((v) => Math.max(v, 1e-9)); t += h; }
+      hist.push([t, y[0], y[1]]); if (hist.length > 6000) hist.shift();
+    }
+    function draw() {
+      const pr = params(), ex = pr.c / pr.d, ey = (pr.a / pr.b) * (1 - ex / pr.K);
+      const xmax = Math.max(ex * 2.5, ...hist.map((p) => p[1])) * 1.1, ymax = Math.max(Math.max(ey, 1) * 2.5, ...hist.map((p) => p[2])) * 1.1;
+      const span = 60, f1 = Charts.frame(ts, { xmin: Math.max(0, t - span), xmax: Math.max(span, t), ymin: 0, ymax: Math.max(xmax, ymax), xlabel: I18n.t('time'), ylabel: I18n.t('animals') });
+      for (const [k, color] of [[1, '#4dabf7'], [2, '#ff922b']]) { f1.ctx.strokeStyle = color; f1.ctx.lineWidth = 2; f1.ctx.beginPath(); hist.forEach((p, i) => (i ? f1.ctx.lineTo(f1.X(p[0]), f1.Y(p[k])) : f1.ctx.moveTo(f1.X(p[0]), f1.Y(p[k])))); f1.ctx.stroke(); }
+      const fr = Charts.frame(ph, { xmin: 0, xmax, ymin: 0, ymax, xlabel: I18n.t('rabbits (prey)'), ylabel: I18n.t('foxes (predators)') });
+      map = { fr, xmax, ymax };
+      const f = Sims.lotka(pr);
+      fr.ctx.strokeStyle = Theme.light ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.2)'; fr.ctx.lineWidth = 1;
+      for (let i = 1; i < 16; i++) for (let j = 1; j < 11; j++) { // direction field
+        const px = (xmax * i) / 16, py = (ymax * j) / 11, [dx, dy] = f([px, py]);
+        const sx = dx / xmax, sy = dy / ymax, L = Math.hypot(sx, sy) || 1, X = fr.X(px), Y = fr.Y(py);
+        fr.ctx.beginPath(); fr.ctx.moveTo(X, Y); fr.ctx.lineTo(X + (sx / L) * 11, Y - (sy / L) * 11); fr.ctx.stroke();
+      }
+      fr.ctx.strokeStyle = '#cc5de8'; fr.ctx.lineWidth = 2; fr.ctx.beginPath();
+      hist.forEach((p, i) => (i ? fr.ctx.lineTo(fr.X(p[1]), fr.Y(p[2])) : fr.ctx.moveTo(fr.X(p[1]), fr.Y(p[2])))); fr.ctx.stroke();
+      if (ey > 0) { fr.ctx.fillStyle = Theme.text; fr.ctx.beginPath(); fr.ctx.arc(fr.X(ex), fr.Y(ey), 4, 0, Math.PI * 2); fr.ctx.fill(); }
+      fr.ctx.fillStyle = '#cc5de8'; fr.ctx.beginPath(); fr.ctx.arc(fr.X(y[0]), fr.Y(y[1]), 5, 0, Math.PI * 2); fr.ctx.fill();
+      statsEl.replaceChildren(stat(I18n.t('time'), f4(t)), stat(I18n.t('rabbits'), f4(y[0])), stat(I18n.t('foxes'), f4(y[1])), stat(I18n.t('balance point'), ey > 0 ? `(${f4(ex)}, ${f4(ey)})` : I18n.t('foxes die out')));
+    }
+    ph.addEventListener('pointerdown', (e) => {
+      if (!map) return;
+      const [px, py] = canvasXY(ph, e), { fr, xmax, ymax } = map;
+      const x = ((px - fr.x0) / (fr.x1 - fr.x0)) * xmax, yy = ((fr.y1 - py) / (fr.y1 - fr.y0)) * ymax;
+      if (x > 0 && yy > 0) { reset([x, yy]); if (!running) setRunning(true); }
+    });
+    const sliders = [slider('Rabbit births α', 0.1, 3, () => P.a, (v) => { P.a = v; draw(); }), slider('Hunting success β', 0.005, 0.2, () => P.b, (v) => { P.b = v; draw(); }, { log: true }),
+      slider('Fox deaths γ', 0.1, 2, () => P.c, (v) => { P.c = v; draw(); }), slider('Fox births per rabbit δ', 0.002, 0.05, () => P.d, (v) => { P.d = v; draw(); }, { log: true }),
+      slider('Food for at most K rabbits', 50, 1000, () => P.K, (v) => { P.K = v; draw(); }), slider('Time speed', 0.5, 10, () => P.speed, (v) => { P.speed = v; })];
+    reset();
+    return {
+      controls: [check('Limited food for the rabbits', () => P.limited, (v) => { P.limited = v; draw(); }), U.el('button', { type: 'button', class: 'small', onclick: () => reset() }, 'Restart')],
+      view: el('div', {}, el('div', { class: 'sim-split' }, ph, el('div', {}, ts, el('div', { class: 'grid2' }, sliders.map((s) => s.el)))), statsEl,
+        el('p', { class: 'hint' }, 'More rabbits feed more foxes; more foxes eat more rabbits; then the foxes starve and the rabbits recover. The populations chase each other in endless cycles (blue rabbits, orange foxes), which are closed loops in the phase plane on the left. With limited food the loops spiral in to a steady balance. Click in the phase plane to start from another point.')),
+      step, draw, reset: () => reset(), stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- logistic map (cobweb, time series, bifurcation)
+  function logisticTab() {
+    const P = st.logi;
+    let xs, acc = 0, bifCache = null, bifMap;
+    const cob = el('canvas', { class: 'chart tall' }), series = el('canvas', { class: 'chart' }), bif = el('canvas', { class: 'chart' }), statsEl = el('div', { class: 'pl-stats' });
+    const R0 = 2.5, R1 = 4;
+    function reset() { xs = [P.x0]; acc = 0; draw(); }
+    function step(dt = 1 / 60) {
+      acc += Math.min(dt, 0.1) * P.speed;
+      while (acc >= 1) { const x = xs[xs.length - 1]; xs.push(P.r * x * (1 - x)); acc--; }
+      if (xs.length > 3000) xs = xs.slice(-2000);
+    }
+    function draw() {
+      const r = P.r, fr = Charts.frame(cob, { xmin: 0, xmax: 1, ymin: 0, ymax: 1, xlabel: 'xₙ', ylabel: 'xₙ₊₁' }), { ctx, X, Y } = fr;
+      ctx.strokeStyle = Theme.muted; ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(1), Y(1)); ctx.stroke();
+      ctx.strokeStyle = '#4dabf7'; ctx.lineWidth = 2; ctx.beginPath();
+      for (let i = 0; i <= 200; i++) { const x = i / 200; i ? ctx.lineTo(X(x), Y(r * x * (1 - x))) : ctx.moveTo(X(x), Y(0)); }
+      ctx.stroke();
+      const tail = xs.slice(-150);
+      ctx.lineWidth = 1.3;
+      for (let i = 0; i < tail.length - 1; i++) {
+        const a = tail[i], b = tail[i + 1];
+        ctx.strokeStyle = `rgba(255,146,43,${0.15 + (0.85 * i) / tail.length})`;
+        ctx.beginPath(); ctx.moveTo(X(a), Y(i === 0 && xs.length === tail.length ? 0 : a)); ctx.lineTo(X(a), Y(b)); ctx.lineTo(X(b), Y(b)); ctx.stroke();
+      }
+      const last = xs.slice(-80), f2 = Charts.frame(series, { xmin: Math.max(0, xs.length - 80), xmax: Math.max(80, xs.length), ymin: 0, ymax: 1, xlabel: 'n', ylabel: 'xₙ' });
+      f2.ctx.strokeStyle = '#ff922b'; f2.ctx.lineWidth = 1.5; f2.ctx.beginPath();
+      last.forEach((x, i) => { const n = xs.length - last.length + i; i ? f2.ctx.lineTo(f2.X(n), f2.Y(x)) : f2.ctx.moveTo(f2.X(n), f2.Y(x)); });
+      f2.ctx.stroke();
+      last.forEach((x, i) => { f2.ctx.fillStyle = '#ff922b'; f2.ctx.beginPath(); f2.ctx.arc(f2.X(xs.length - last.length + i), f2.Y(x), 2, 0, Math.PI * 2); f2.ctx.fill(); });
+      // bifurcation diagram, computed once per size
+      const f3 = Charts.frame(bif, { xmin: R0, xmax: R1, ymin: 0, ymax: 1, xlabel: 'r', ylabel: 'x' });
+      bifMap = f3;
+      const key = `${f3.w}x${f3.h}${Theme.light}`;
+      if (!bifCache || bifCache.key !== key) {
+        const c = document.createElement('canvas'), pw = Math.max(1, Math.round(f3.x1 - f3.x0)), ph = Math.max(1, Math.round(f3.y1 - f3.y0));
+        c.width = pw; c.height = ph;
+        const g = c.getContext('2d'), img = g.createImageData(pw, ph), px = new Uint32Array(img.data.buffer), dot = Theme.light ? RGB(30, 60, 120) : RGB(150, 200, 255);
+        for (let col = 0; col < pw; col++) {
+          const rr = R0 + ((col + 0.5) / pw) * (R1 - R0);
+          let x = Sims.logisticSettle(rr, 0.5, 300);
+          for (let k = 0; k < 160; k++) { x = rr * x * (1 - x); const row = Math.round((1 - x) * (ph - 1)); px[row * pw + col] = dot; }
+        }
+        g.putImageData(img, 0, 0);
+        bifCache = { key, c };
+      }
+      f3.ctx.drawImage(bifCache.c, f3.x0, f3.y0, f3.x1 - f3.x0, f3.y1 - f3.y0);
+      if (r >= R0) { f3.ctx.strokeStyle = '#ff6b6b'; f3.ctx.lineWidth = 1.5; f3.ctx.beginPath(); f3.ctx.moveTo(f3.X(r), f3.y0); f3.ctx.lineTo(f3.X(r), f3.y1); f3.ctx.stroke(); }
+      const per = Sims.logisticPeriod(r), lya = Sims.lyapunov(r);
+      statsEl.replaceChildren(stat('r', f4(r)), stat('xₙ', f4(xs[xs.length - 1])), stat('n', String(xs.length - 1)),
+        stat(I18n.t('behaviour'), per === 1 ? I18n.t('settles to one value') : per ? `${I18n.t('cycle of length')} ${per}` : I18n.t('chaos')), stat(I18n.t('Lyapunov exponent (> 0 = chaos)'), f4(lya)));
+    }
+    bif.addEventListener('pointerdown', (e) => {
+      if (!bifMap) return;
+      const [px] = canvasXY(bif, e), r = R0 + ((px - bifMap.x0) / (bifMap.x1 - bifMap.x0)) * (R1 - R0);
+      if (r >= R0 && r <= R1) { P.r = +r.toFixed(4); rS.sync(); reset(); }
+    });
+    const rS = slider('Growth rate r', 0, 4, () => P.r, (v) => { P.r = v; reset(); }, { prec: 5 });
+    const sliders = [rS, slider('Start value x₀', 0.01, 0.99, () => P.x0, (v) => { P.x0 = v; reset(); }), slider('Steps per second', 1, 60, () => P.speed, (v) => { P.speed = v; })];
+    reset();
+    return {
+      controls: [U.el('button', { type: 'button', class: 'small', onclick: () => { for (let i = 0; i < 100; i++) { const x = xs[xs.length - 1]; xs.push(P.r * x * (1 - x)); } draw(); } }, '+100 steps')],
+      view: el('div', {}, el('div', { class: 'sim-split' }, cob, el('div', {}, series, bif)), el('div', { class: 'grid3' }, sliders.map((s) => s.el)), statsEl,
+        el('p', { class: 'hint' }, 'xₙ₊₁ = r·xₙ·(1 − xₙ) is a simple model of a population with limited food. The cobweb (left) shows each step: up to the curve, across to the diagonal. Below r = 3 it settles to one value; then the cycle doubles (2, 4, 8, …) faster and faster until chaos at r ≈ 3.57 — with calm windows such as the 3-cycle at r ≈ 3.83. The bifurcation diagram (click it to pick r) shows it all at once.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- travelling salesman
+  function tspTab() {
+    const P = st.tsp;
+    let pts, tour, len, best, tries, better, T, T0, cool, sinceBetter, hist, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), chart = el('canvas', { class: 'chart' }), statsEl = el('div', { class: 'pl-stats' });
+    function makePoints() {
+      const n = P.n, out = [];
+      if (P.layout === 'circle') for (let i = 0; i < n; i++) { const a = (2 * Math.PI * i) / n; out.push([0.5 + 0.42 * Math.cos(a), 0.5 + 0.42 * Math.sin(a)]); }
+      else if (P.layout === 'grid') { const k = Math.ceil(Math.sqrt(n)); for (let i = 0; i < n; i++) out.push([0.08 + (0.84 * (i % k)) / Math.max(1, k - 1), 0.08 + (0.84 * Math.floor(i / k)) / Math.max(1, k - 1)]); }
+      else if (P.layout === 'clusters') { const cs = Array.from({ length: 5 }, () => [0.15 + Math.random() * 0.7, 0.15 + Math.random() * 0.7]); for (let i = 0; i < n; i++) { const c = cs[i % 5]; out.push([c[0] + (Math.random() - 0.5) * 0.18, c[1] + (Math.random() - 0.5) * 0.18]); } }
+      else for (let i = 0; i < n; i++) out.push([0.04 + Math.random() * 0.92, 0.04 + Math.random() * 0.92]);
+      if (P.layout === 'circle') for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+      return out;
+    }
+    function startTour() {
+      if (P.start === 'nearest') tour = Sims.nearestTour(pts);
+      else { tour = pts.map((_, i) => i); for (let i = tour.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [tour[i], tour[j]] = [tour[j], tour[i]]; } }
+      len = Sims.tourLength(pts, tour); best = len; tries = 0; better = 0; sinceBetter = 0; hist = [[0, len]];
+      T0 = (len / Math.max(1, pts.length)) * 0.6; T = T0; cool = Math.pow(1e-3, 1 / (3000 * Math.max(4, pts.length)));
+      draw();
+    }
+    function reset() { pts = makePoints(); startTour(); }
+    function step() {
+      if (pts.length < 4) return;
+      for (let k = 0; k < P.speed; k++) {
+        const d = Sims.twoOptMove(pts, tour, P.mode === 'anneal' ? T : 0);
+        tries++;
+        if (d) { len += d; if (len < best - 1e-12) { best = len; better++; sinceBetter = 0; } }
+        sinceBetter++;
+        if (P.mode === 'anneal') T *= cool;
+      }
+      if (tries % 5000 < P.speed) len = Sims.tourLength(pts, tour); // clear rounding drift now and then
+      hist.push([tries, len]); if (hist.length > 3000) hist = hist.filter((_, i) => i % 2 === 0);
+      if ((P.mode !== 'anneal' && sinceBetter > 40 * pts.length * pts.length) || (P.mode === 'anneal' && T < T0 * 1e-3)) pause();
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv), pad = 16, s = Math.min(w, h) - 2 * pad, ox = (w - s) / 2, oy = (h - s) / 2;
+      lay = { s, ox, oy };
+      const S = (p) => [ox + p[0] * s, oy + p[1] * s];
+      ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+      tour.forEach((i, k) => (k ? ctx.lineTo(...S(pts[i])) : ctx.moveTo(...S(pts[i])))); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = Theme.text;
+      for (const p of pts) { ctx.beginPath(); ctx.arc(...S(p), 3.5, 0, Math.PI * 2); ctx.fill(); }
+      const fr = Charts.frame(chart, { xmin: 0, xmax: Math.max(10, tries), ymin: 0, ymax: Math.max(...hist.map((p) => p[1])) * 1.1 || 1, xlabel: I18n.t('moves tried'), ylabel: I18n.t('tour length') });
+      fr.ctx.strokeStyle = '#ff922b'; fr.ctx.lineWidth = 2; fr.ctx.beginPath(); hist.forEach(([x, y], i) => (i ? fr.ctx.lineTo(fr.X(x), fr.Y(y)) : fr.ctx.moveTo(fr.X(x), fr.Y(y)))); fr.ctx.stroke();
+      statsEl.replaceChildren(stat(I18n.t('cities'), String(pts.length)), stat(I18n.t('tour length'), f4(len)), stat(I18n.t('best so far'), f4(best)),
+        stat(I18n.t('moves tried'), String(tries)), stat(I18n.t('improvements'), String(better)), ...(P.mode === 'anneal' ? [stat(I18n.t('temperature'), f4(T))] : []),
+        ...(P.layout === 'circle' ? [stat(I18n.t('shortest possible'), f4(2 * pts.length * 0.42 * Math.sin(Math.PI / pts.length)))] : []));
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (!lay) return;
+      const [x, y] = canvasXY(cv, e), p = [(x - lay.ox) / lay.s, (y - lay.oy) / lay.s];
+      if (p[0] < 0 || p[1] < 0 || p[0] > 1 || p[1] > 1) return;
+      pts.push(p);
+      const n = pts.length - 1;
+      let bi = 0, bd = Infinity; // insert where it lengthens the tour least
+      for (let i = 0; i < tour.length; i++) { const a = pts[tour[i]], b = pts[tour[(i + 1) % tour.length]], d = Math.hypot(a[0] - p[0], a[1] - p[1]) + Math.hypot(b[0] - p[0], b[1] - p[1]) - Math.hypot(a[0] - b[0], a[1] - b[1]); if (d < bd) { bd = d; bi = i + 1; } }
+      tour.splice(bi, 0, n); len = Sims.tourLength(pts, tour); best = Math.min(best, len); sinceBetter = 0;
+      draw();
+    });
+    const mode = choose([['2opt', '2-opt (only improvements)'], ['anneal', 'Simulated annealing']], () => P.mode, (v) => { P.mode = v; startTour(); });
+    const layout = choose([['random', 'Random cities'], ['clusters', 'Clusters'], ['circle', 'On a circle'], ['grid', 'Grid']], () => P.layout, (v) => { P.layout = v; reset(); });
+    const start = choose([['random', 'Start: random tour'], ['nearest', 'Start: nearest neighbour']], () => P.start, (v) => { P.start = v; startTour(); });
+    const sliders = [slider('Cities', 5, 300, () => P.n, (v) => { P.n = Math.round(v); reset(); }, { step: 1 }), slider('Moves per frame', 1, 5000, () => P.speed, (v) => { P.speed = Math.round(v); }, { log: true, step: 1 })];
+    reset();
+    return {
+      controls: [mode, layout, start, U.el('button', { type: 'button', class: 'small', onclick: startTour }, 'New start tour')],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, sliders.map((s) => s.el)), chart, statsEl,
+        el('p', { class: 'hint' }, 'Find the shortest round trip through all the cities. There are (n − 1)!/2 possible tours — for 60 cities more than atoms in the universe — so we improve a tour step by step instead: 2-opt reverses a stretch of the route whenever that makes it shorter, which removes every crossing but can get stuck. Simulated annealing sometimes accepts a worse tour, less and less often as it “cools”, and usually finds a better one. Click to add a city.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
+  // ---------------------------------------------------------------- convex hull
+  const HULL_INFO = {
+    jarvis: 'Gift wrapping (Jarvis march) — O(n·h): start at the leftmost point and keep turning to the point that has all others on its left, like wrapping a ribbon around nails.',
+    monotone: 'Monotone chain (Andrew) — O(n log n): sort the points by x, then build the lower and upper edge, removing every point that would make a right turn.',
+  };
+  function hullTab() {
+    const P = st.hull;
+    let pts, gen, state, steps, done, lay;
+    const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' }), info = el('p', { class: 'hint' });
+    function makePoints() {
+      const out = [];
+      for (let i = 0; i < P.n; i++) {
+        if (P.layout === 'disk') { const r = Math.sqrt(Math.random()) * 0.45, a = Math.random() * 2 * Math.PI; out.push([0.5 + r * Math.cos(a), 0.5 + r * Math.sin(a)]); }
+        else if (P.layout === 'gauss') { const u = Math.random() || 1e-9, v = Math.random(), r = Math.sqrt(-2 * Math.log(u)) * 0.12; out.push([Math.min(0.98, Math.max(0.02, 0.5 + r * Math.cos(2 * Math.PI * v))), Math.min(0.98, Math.max(0.02, 0.5 + r * Math.sin(2 * Math.PI * v)))]); }
+        else out.push([0.04 + Math.random() * 0.92, 0.04 + Math.random() * 0.92]);
+      }
+      return out;
+    }
+    function restart() { gen = Sims.HULL[P.algo](pts); state = null; steps = 0; done = false; info.textContent = HULL_INFO[P.algo]; draw(); }
+    function reset() { pts = makePoints(); restart(); }
+    function step() {
+      if (done) return;
+      for (let k = 0; k < P.speed; k++) {
+        const r = gen.next();
+        if (r.done) { done = true; break; }
+        state = r.value; steps++;
+        if (state.done) { done = true; pause(); break; }
+      }
+    }
+    function draw() {
+      const { ctx, w, h } = Charts.setup(cv), pad = 18, sx = w - 2 * pad, sy = h - 2 * pad;
+      lay = { pad, sx, sy };
+      const S = (i) => [pad + pts[i][0] * sx, pad + pts[i][1] * sy];
+      const line = (a, b, color, dash) => { ctx.strokeStyle = color; ctx.setLineDash(dash || []); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(...S(a)); ctx.lineTo(...S(b)); ctx.stroke(); ctx.setLineDash([]); };
+      if (state) {
+        const chain = state.hull || state.chain || [];
+        if (state.done && chain.length > 2) { ctx.fillStyle = 'rgba(255,146,43,0.12)'; ctx.beginPath(); chain.forEach((i, k) => (k ? ctx.lineTo(...S(i)) : ctx.moveTo(...S(i)))); ctx.closePath(); ctx.fill(); }
+        ctx.strokeStyle = '#ff922b'; ctx.lineWidth = 2.5; ctx.beginPath();
+        chain.forEach((i, k) => (k ? ctx.lineTo(...S(i)) : ctx.moveTo(...S(i))));
+        if (state.done) ctx.closePath();
+        ctx.stroke();
+        if (!state.done) {
+          if (state.cand != null) line(state.from, state.cand, '#51cf66');
+          if (state.check != null && state.from != null) line(state.from, state.check, '#ff6b6b', [5, 4]);
+          else if (state.check != null && chain.length) line(chain[chain.length - 1], state.check, '#ff6b6b', [5, 4]);
+        }
+      }
+      const onHull = new Set(state && (state.hull || state.chain) || []);
+      pts.forEach((_, i) => { ctx.fillStyle = onHull.has(i) ? '#ff922b' : Theme.text; ctx.beginPath(); ctx.arc(...S(i), onHull.has(i) ? 4.5 : 3, 0, Math.PI * 2); ctx.fill(); });
+      statsEl.replaceChildren(stat(I18n.t('points'), String(pts.length)), stat(I18n.t('corners of the hull'), done && state ? String((state.hull || []).length) : '—'),
+        stat(I18n.t('steps'), String(steps)), stat(I18n.t('status'), I18n.t(done ? 'finished' : steps ? 'working…' : 'ready')));
+    }
+    cv.addEventListener('pointerdown', (e) => {
+      if (!lay) return;
+      const [x, y] = canvasXY(cv, e), p = [(x - lay.pad) / lay.sx, (y - lay.pad) / lay.sy];
+      if (p[0] >= 0 && p[1] >= 0 && p[0] <= 1 && p[1] <= 1) { pts.push(p); restart(); }
+    });
+    const algo = choose([['jarvis', 'Gift wrapping (Jarvis)'], ['monotone', 'Monotone chain (Andrew)']], () => P.algo, (v) => { P.algo = v; restart(); });
+    const layout = choose([['disk', 'Points in a disc'], ['square', 'Points in a square'], ['gauss', 'Bell-shaped cloud']], () => P.layout, (v) => { P.layout = v; reset(); });
+    const sliders = [slider('Points', 3, 500, () => P.n, (v) => { P.n = Math.round(v); reset(); }, { step: 1 }), slider('Steps per frame', 1, 200, () => P.speed, (v) => { P.speed = Math.round(v); }, { log: true, step: 1 })];
+    reset();
+    return {
+      controls: [algo, layout, U.el('button', { type: 'button', class: 'small', onclick: reset }, 'New points')],
+      view: el('div', {}, cv, el('div', { class: 'grid2' }, sliders.map((s) => s.el)), statsEl, info,
+        el('p', { class: 'hint' }, 'The convex hull is the shape a rubber band takes when stretched around all the points. Green: the best candidate so far. Red dashed: the point being checked. Orange: the hull being built. Click to add points; press Run to watch, or Step to go one comparison at a time.')),
+      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+    };
+  }
+
   // ---------------------------------------------------------------- page
   const SIM_KEYWORDS = {
+    boids: 'boids flocking birds swarm schwarm', ant: 'langton ant turmite ameise', sand: 'sandpile avalanche criticality sandhaufen', dla: 'dla aggregation crystal frost lightning kristall',
+    ripple: 'waves interference double slit wellen', gas: 'ideal gas maxwell boltzmann brownian temperature pressure', grav: 'gravity n-body three body figure eight lagrange',
+    sir: 'epidemic sir infection pandemic epidemie', prey: 'lotka volterra predator prey räuber beute', logi: 'logistic map chaos bifurcation cobweb feigenbaum',
+    tsp: 'travelling salesman tsp annealing 2-opt route', hull: 'convex hull jarvis graham monotone konvexe hülle',
     life: 'conway cellular automaton', eca: 'rule 30 rule 110 wolfram', lsys: 'plant tree turtle', rd: 'turing gray scott', ulam: 'prime spiral',
     pend: 'double pendulum chaos swing period', proj: 'throw ballistic trajectory parabola air resistance', orbit: 'kepler planet gravity ellipse',
     epi: 'fourier draw circles dft', sort: 'bubble quicksort merge heap insertion selection', path: 'dijkstra a* astar bfs maze pathfinding',
   };
   const TABS = { life: ['Game of Life', lifeTab, 'Patterns'], eca: ['1D automata', ecaTab, 'Patterns'], lsys: ['L-systems', lsysTab, 'Patterns'], rd: ['Reaction–diffusion', rdTab, 'Patterns'], ulam: ['Ulam spiral', ulamTab, 'Patterns'],
-    pend: ['Pendulums', pendulumTab, 'Physics'], proj: ['Projectile', projectileTab, 'Physics'], orbit: ['Orbits', orbitTab, 'Physics'], epi: ['Fourier epicycles', epicycleTab, 'Physics'],
-    sort: ['Sorting', sortTab, 'Algorithms'], path: ['Shortest paths', pathTab, 'Algorithms'] };
+    boids: ['Flocking', boidsTab, 'Patterns'], ant: ["Langton's ant", antTab, 'Patterns'], sand: ['Sandpile', sandTab, 'Patterns'], dla: ['Crystal growth', dlaTab, 'Patterns'],
+    pend: ['Pendulums', pendulumTab, 'Physics'], proj: ['Projectile', projectileTab, 'Physics'], orbit: ['Orbits', orbitTab, 'Physics'], grav: ['Gravity', gravityTab, 'Physics'],
+    ripple: ['Ripple tank', rippleTab, 'Physics'], gas: ['Gas in a box', gasTab, 'Physics'], epi: ['Fourier epicycles', epicycleTab, 'Physics'],
+    sir: ['Epidemic', sirTab, 'Models'], prey: ['Predator & prey', preyTab, 'Models'], logi: ['Logistic map', logisticTab, 'Models'],
+    sort: ['Sorting', sortTab, 'Algorithms'], path: ['Shortest paths', pathTab, 'Algorithms'], tsp: ['Travelling salesman', tspTab, 'Algorithms'], hull: ['Convex hull', hullTab, 'Algorithms'] };
   const built = {};
   let playBtn, ctlBox, speedEl;
   function show(k) {
@@ -1171,8 +2155,8 @@ const Sims = (() => {
   Shell.register('simulations', {
     label: 'Simulations', order: 11, root: () => document.getElementById('mod-simulations'), init,
     onHide: () => { if (running) setRunning(false); },
-    desc: 'Cellular automata, L-systems and Turing patterns; pendulums, projectiles and orbits; Fourier epicycles; sorting and path-finding algorithms.',
-    features: ['Game of Life', 'Double pendulum', 'Fourier epicycles', 'Sorting & paths'],
+    desc: '23 simulations: cellular automata, flocks, sandpiles and crystal growth; pendulums, orbits, waves and gases; epidemics and predators; sorting, paths, salesmen and hulls.',
+    features: ['Flocking & Life', 'Waves & gravity', 'Epidemic & chaos', 'Algorithms'],
     commands: Object.entries(TABS).map(([k, [label, , g]]) => ({ label: `Simulation: ${label}`, keywords: `${g} ${k} ${SIM_KEYWORDS[k] || ''}`, run: () => { if (root) show(k); else st.tab = k; } })),
   });
   window.Sims = Sims;
