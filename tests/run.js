@@ -18,11 +18,11 @@ const MODULES = ['util.js', 'mathexpr.js', 'calcx.js', 'symbolic.js', 'matrix.js
 for (const f of MODULES) vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', f), 'utf8'), ctx, { filename: f });
 for (const name of ['U', 'MX', 'CalcX', 'Sym', 'LinAlg', 'Algebra', 'Charts']) ctx[name] = vm.runInContext(name, ctx);
 // Optional modules (they register themselves on load and expose testable parts on window).
-for (const f of ['practice.js', 'simulations.js', 'probability.js', 'geometry.js', 'surface.js']) {
+for (const f of ['practice.js', 'simulations.js', 'probability.js', 'geometry.js', 'surface.js', 'pi.js']) {
   const p = path.join(ROOT, 'js', f);
   if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
 }
-for (const name of ['Geo', 'ProbLab', 'Practice', 'Sims']) { try { ctx[name] = vm.runInContext(name, ctx); } catch { /* module not present */ } }
+for (const name of ['Geo', 'ProbLab', 'Practice', 'Sims', 'PiMath']) { try { ctx[name] = vm.runInContext(name, ctx); } catch { /* module not present */ } }
 
 let passed = 0, failed = 0;
 const fail = (name, msg) => { failed++; console.log(`  ✗ ${name}: ${msg}`); };

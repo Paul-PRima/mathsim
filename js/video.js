@@ -80,7 +80,7 @@ const Video = (() => {
   const vpcC = () => full('vpcC', 1, 0, u8(0, 40, (8 << 4) | (1 << 1), 1, 1, 1), u16(0));
 
   // ---------------------------------------------------------------- recording
-  // opts: { width, height, fps, frames, bitrate, drawFrame: async (i, t) => CanvasImageSource,
+  // opts: { width, height, fps, frames, bitrate, drawFrame: async (i, t) => CanvasImageSource (null ends the video early),
   //         onProgress(frac, i), isCancelled() }
   async function record(opts) {
     if (!supported()) throw new Error('video encoding (WebCodecs) is not available here — use the desktop app or Chrome/Edge');
@@ -125,6 +125,7 @@ const Video = (() => {
         if (failure) throw failure;
         const t = opts.frames > 1 ? i / (opts.frames - 1) : 1;
         const src = await opts.drawFrame(i, t);
+        if (!src) break;
         tctx.drawImage(src, 0, 0, width, height);
         const frame = new VideoFrame(tmp, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
         encoder.encode(frame, { keyFrame: i % keyEvery === 0 });

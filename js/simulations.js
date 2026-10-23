@@ -176,7 +176,7 @@ const Sims = (() => {
     merge: function* (a) {
       function* rec(lo, hi) {
         if (hi - lo < 2) return;
-        const mid = (lo + hi) >> 1;
+        const mid = Math.floor((lo + hi) / 2);
         yield* rec(lo, mid); yield* rec(mid, hi);
         const left = a.slice(lo, mid), right = a.slice(mid, hi);
         let i = 0, j = 0, k = lo;
@@ -190,9 +190,11 @@ const Sims = (() => {
       yield* rec(0, a.length);
     },
     quick: function* (a) {
-      function* rec(lo, hi) {
-        if (lo >= hi) return;
-        const mid = (lo + hi) >> 1; // median of three as pivot, moved to the end
+      const stack = [[0, a.length - 1]]; // explicit stack, so huge inputs can't overflow the call stack
+      while (stack.length) {
+        const [lo, hi] = stack.pop();
+        if (lo >= hi) continue;
+        const mid = Math.floor((lo + hi) / 2); // median of three as pivot, moved to the end
         if (a[mid] < a[lo]) [a[mid], a[lo]] = [a[lo], a[mid]];
         if (a[hi] < a[lo]) [a[hi], a[lo]] = [a[lo], a[hi]];
         if (a[mid] < a[hi]) [a[mid], a[hi]] = [a[hi], a[mid]];
@@ -205,9 +207,8 @@ const Sims = (() => {
         }
         [a[i], a[hi]] = [a[hi], a[i]]; yield { swap: [i, hi] };
         yield { done: i };
-        yield* rec(lo, i - 1); yield* rec(i + 1, hi);
+        stack.push([i + 1, hi], [lo, i - 1]);
       }
-      yield* rec(0, a.length - 1);
     },
     heap: function* (a) {
       const n = a.length;
@@ -222,10 +223,166 @@ const Sims = (() => {
           i = m;
         }
       }
-      for (let i = (n >> 1) - 1; i >= 0; i--) yield* sift(i, n);
+      for (let i = Math.floor(n / 2) - 1; i >= 0; i--) yield* sift(i, n);
       for (let end = n - 1; end > 0; end--) { [a[0], a[end]] = [a[end], a[0]]; yield { swap: [0, end] }; yield { done: end }; yield* sift(0, end); }
     },
   };
+
+  // ---- the same sorts at full speed, for inputs too big to animate: plain loops on a typed array that count
+  // comparisons and writes, and pause (yield) once c.cmp reaches c.stop so a worker can report progress.
+  // Self-contained (no outside names): the sorting worker is built from its source text, and segmentSource
+  // rewrites that text for arrays split into pieces — so element indices must have no side effects or brackets.
+  function fastSortKit() {
+    const c = { cmp: 0, writes: 0, stop: Infinity };
+    const alloc = (n) => new (n < 2 ** 32 - 8 ? Uint32Array : Float64Array)(n);
+    const get = (a, i) => a[i], len = (a) => a.length;
+    // the starting order, built in place; yields its progress (0…1) now and then, returns { a, max }
+    function* make(n, input) {
+      const a = alloc(n), every = 1 << 20;
+      for (let i = 0; i < n; i++) { a[i] = i + 1; if (i % every === 0) yield (0.3 * i) / n; }
+      if (input === 'random' || input === 'few') for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; if (i % every === 0) yield 1 - (0.7 * i) / n; }
+      let max = n;
+      if (input === 'few') { const q = Math.ceil(n / 5); max = 5 * q; for (let i = 0; i < n; i++) a[i] = Math.ceil((a[i] / n) * 5) * q; }
+      if (input === 'reversed') for (let i = 0, j = n - 1; i < j; i++, j--) { const t = a[i]; a[i] = a[j]; a[j] = t; }
+      if (input === 'nearly') for (let k = 0; k < Math.max(1, n / 20); k++) { const i = Math.floor(Math.random() * (n - 1)), t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; }
+      return { a, max };
+    }
+    const sorts = {
+      bubble: function* (a) {
+        for (let end = a.length - 1; end > 0; end--) {
+          let swapped = false;
+          for (let i = 0; i < end; i++) {
+            if (++c.cmp >= c.stop) yield;
+            if (a[i] > a[i + 1]) { const t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; c.writes += 2; swapped = true; }
+          }
+          if (!swapped) break;
+        }
+      },
+      insertion: function* (a) {
+        for (let i = 1; i < a.length; i++) {
+          for (let j = i; j > 0; j--) {
+            if (++c.cmp >= c.stop) yield;
+            if (a[j - 1] <= a[j]) break;
+            const t = a[j - 1]; a[j - 1] = a[j]; a[j] = t; c.writes += 2;
+          }
+        }
+      },
+      selection: function* (a) {
+        const n = a.length;
+        for (let i = 0; i < n - 1; i++) {
+          let m = i;
+          for (let j = i + 1; j < n; j++) { if (++c.cmp >= c.stop) yield; if (a[j] < a[m]) m = j; }
+          if (m !== i) { const t = a[i]; a[i] = a[m]; a[m] = t; c.writes += 2; }
+        }
+      },
+      shell: function* (a) {
+        const n = a.length;
+        for (let gap = Math.floor(n / 2); gap > 0; gap = Math.floor(gap / 2.2) || (gap > 1 ? 1 : 0)) {
+          for (let i = gap; i < n; i++) {
+            for (let j = i; j >= gap; j -= gap) {
+              if (++c.cmp >= c.stop) yield;
+              if (a[j - gap] <= a[j]) break;
+              const t = a[j - gap]; a[j - gap] = a[j]; a[j] = t; c.writes += 2;
+            }
+          }
+          if (gap === 1) break;
+        }
+      },
+      // top-down like the animated one, with an explicit stack of (lo, hi, halves sorted?) triples
+      merge: function* (a) {
+        const aux = alloc(a.length), st = [0, a.length, 0];
+        while (st.length) {
+          const ready = st.pop(), hi = st.pop(), lo = st.pop();
+          if (hi - lo < 2) continue;
+          const mid = Math.floor((lo + hi) / 2);
+          if (!ready) { st.push(lo, hi, 1, mid, hi, 0, lo, mid, 0); continue; }
+          for (let k = lo; k < hi; k++) aux[k] = a[k];
+          let i = lo, j = mid, k = lo;
+          while (i < mid && j < hi) {
+            if (++c.cmp >= c.stop) yield;
+            if (aux[i] <= aux[j]) { a[k] = aux[i]; i++; } else { a[k] = aux[j]; j++; }
+            k++;
+          }
+          for (; i < mid; i++, k++) a[k] = aux[i];
+          for (; j < hi; j++, k++) a[k] = aux[j];
+          c.writes += hi - lo;
+        }
+      },
+      // the smaller part goes on top of the stack, so the stack stays O(log n) deep
+      quick: function* (a) {
+        const st = [0, a.length - 1];
+        while (st.length) {
+          const hi = st.pop(), lo = st.pop();
+          const mid = Math.floor((lo + hi) / 2);
+          let t;
+          if (a[mid] < a[lo]) { t = a[mid]; a[mid] = a[lo]; a[lo] = t; }
+          if (a[hi] < a[lo]) { t = a[hi]; a[hi] = a[lo]; a[lo] = t; }
+          if (a[mid] < a[hi]) { t = a[mid]; a[mid] = a[hi]; a[hi] = t; }
+          c.writes += 2;
+          const p = a[hi];
+          let i = lo;
+          for (let j = lo; j < hi; j++) { if (++c.cmp >= c.stop) yield; if (a[j] < p) { t = a[i]; a[i] = a[j]; a[j] = t; c.writes += 2; i++; } }
+          t = a[i]; a[i] = a[hi]; a[hi] = t; c.writes += 2;
+          const left = lo < i - 1, right = i + 1 < hi;
+          if (left && right && i - lo > hi - i) st.push(lo, i - 1, i + 1, hi);
+          else { if (right) st.push(i + 1, hi); if (left) st.push(lo, i - 1); }
+        }
+      },
+      heap: function* (a) {
+        const n = a.length;
+        let s = Math.floor(n / 2) - 1, end = n - 1, t;
+        for (;;) {
+          let i, size;
+          if (s >= 0) { i = s--; size = n; } // build the heap…
+          else if (end > 0) { t = a[0]; a[0] = a[end]; a[end] = t; c.writes += 2; i = 0; size = end--; } // …then take the largest off
+          else break;
+          for (;;) {
+            const l = 2 * i + 1, r = l + 1;
+            let m = i;
+            if (l < size) { if (++c.cmp >= c.stop) yield; if (a[l] > a[m]) m = l; }
+            if (r < size) { if (++c.cmp >= c.stop) yield; if (a[r] > a[m]) m = r; }
+            if (m === i) break;
+            t = a[i]; a[i] = a[m]; a[m] = t; c.writes += 2; i = m;
+          }
+        }
+      },
+    };
+    // runs a whole sort without pausing; returns { a, cmp, writes, ms }
+    function run(n, input, algo) {
+      const g = make(n, input);
+      let r;
+      while (!(r = g.next()).done);
+      c.cmp = 0; c.writes = 0; c.stop = Infinity;
+      const t0 = performance.now();
+      for (const _ of sorts[algo](r.value.a));
+      return { a: r.value.a, cmp: c.cmp, writes: c.writes, ms: performance.now() - t0 };
+    }
+    // predicted comparisons, writes and time for n values, from timed runs on small inputs: n·log n algorithms
+    // scale as n·log₂n, the rest by the power law through two sizes (insertion on nearly sorted data is ≈ n, …)
+    function predict(n, input, algo) {
+      const nlogn = algo === 'merge' || algo === 'heap' || (algo === 'quick' && input !== 'few');
+      const m = nlogn ? 50000 : algo === 'shell' ? 20000 : 1000;
+      if (n <= 4 * m) { const r = run(n, input, algo); return { cmp: r.cmp, writes: r.writes, ms: r.ms }; }
+      const r1 = run(m, input, algo), r2 = run(4 * m, input, algo), x = n / (4 * m);
+      const scale = (v1, v2) => {
+        if (!v2) return 0;
+        if (nlogn) return v2 * x * (Math.log2(n) / Math.log2(4 * m));
+        return v2 * x ** (v1 ? Math.log(v2 / v1) / Math.log(4) : 1);
+      };
+      const cmp = scale(r1.cmp, r2.cmp);
+      return { cmp, writes: scale(r1.writes, r2.writes), ms: (cmp * Math.max(r2.ms, 1)) / r2.cmp };
+    }
+    return { c, make, sorts, run, predict, get, len };
+  }
+  // The kit's source rewritten for values split into typed arrays of 2^B (one buffer can't exceed ~2 GB):
+  // every a[i] becomes a[i >>> B][i & M], and lengths are kept on the list of pieces. Needs n < 2^32.
+  function segmentSource(src, B) {
+    const M = 2 ** B - 1;
+    return src
+      .replace(/const alloc = [^\n]*/, `const alloc = (n) => { const s = []; for (let o = 0; o < n; o += ${M + 1}) s.push(new Uint32Array(Math.min(${M + 1}, n - o))); s.n = n; return s; };`)
+      .replace(/\b(a|aux)\.length\b/g, '$1.n')
+      .replace(/\b(a|aux)\[([^[\]]+)\]/g, (_, v, i) => `${v}[(${i}) >>> ${B}][(${i}) & ${M}]`);
+  }
 
   // ---- shortest paths on a grid: 0 free, 1 wall, 2 mud (costs 5). Yields after every expanded cell.
   function* gridSearch(grid, w, h, start, goal, algo) {
@@ -420,7 +577,7 @@ const Sims = (() => {
       yield { hull: lower.slice(0, -1).concat(upper.slice(0, -1)), done: true };
     },
   };
-  return { parseRule, lifeStep, rowStep, expand, sieve, ulamXY, rk4, pendulum, pendulumPeriod, doublePendulum, doubleEnergy, projectile, orbitElements, dft, epicycleAt, resample, SORTS, gridSearch, maze,
+  return { parseRule, lifeStep, rowStep, expand, sieve, ulamXY, rk4, pendulum, pendulumPeriod, doublePendulum, doubleEnergy, projectile, orbitElements, dft, epicycleAt, resample, SORTS, fastSortKit, segmentSource, gridSearch, maze,
     sandpileAdd, nbodyStep, nbodyEnergy, lotka, logisticSettle, logisticPeriod, lyapunov, tourLength, nearestTour, twoOptMove, HULL };
 })();
 
@@ -430,7 +587,7 @@ const Sims = (() => {
   const st = { tab: 'life', speed: 12,
     pend: { mode: 'single', angle: 60, L: 1.5, g: 9.81, damp: 0, time: 1 }, proj: { v0: 25, angle: 45, h0: 0, g: 9.81, drag: 0, time: 1 },
     orbit: { v: 0.85, time: 1, areas: true }, epi: { n: 40, secs: 8, circles: true, original: true },
-    sort: { algo: 'quick', input: 'random', n: 80, speed: 4 }, path: { algo: 'astar', speed: 6 },
+    sort: { algo: 'quick', input: 'random', n: 80, speed: 4, animate: true }, path: { algo: 'astar', speed: 6 },
     boids: { n: 150, sep: 1, align: 1, coh: 1, radius: 50, speed: 140, scare: true }, ant: { rule: 'RL', count: 1, speed: 60 }, sand: { rate: 30 }, dla: { seed: 'point', speed: 20 },
     ripple: { mode: 'two', view: 'waves', period: 18, sep: 40, slit: 6 }, gas: { n: 300, temp: 5000, big: false, time: 1 }, grav: { preset: 'eight', time: 1, mass: 5, trails: true },
     sir: { n: 600, radius: 12, rate: 4, recover: 10, home: 0, speed: 3, seed: 3 }, prey: { a: 1.1, b: 0.04, c: 0.4, d: 0.01, K: 400, limited: false, x0: 60, y0: 10, speed: 3 },
@@ -548,10 +705,10 @@ const Sims = (() => {
     const axiom = el('input', { type: 'text', class: 'mono', value: cur.axiom });
     const rules = el('textarea', { class: 'mono sim-rules', rows: 3 }, cur.rules);
     const angle = el('input', { type: 'number', class: 'num', value: cur.angle, step: 'any' });
-    const iters = el('input', { type: 'number', class: 'num', value: cur.n, min: 0, max: 15 });
+    const iters = el('input', { type: 'number', class: 'num', value: cur.n, min: 0 });
     const sync = () => { axiom.value = cur.axiom; rules.value = cur.rules; angle.value = cur.angle; iters.value = cur.n; };
     pre.addEventListener('change', () => { Object.assign(cur, PRESETS[pre.value]); sync(); draw(); });
-    [axiom, rules, angle, iters].forEach((i) => i.addEventListener('input', () => { cur.axiom = axiom.value; cur.rules = rules.value; cur.angle = +angle.value || 0; cur.n = U.clamp(Math.round(+iters.value || 0), 0, 15); draw(); }));
+    [axiom, rules, angle, iters].forEach((i) => i.addEventListener('input', () => { cur.axiom = axiom.value; cur.rules = rules.value; cur.angle = +angle.value || 0; cur.n = Math.max(0, Math.round(+iters.value || 0)); draw(); }));
     let progress = 1;
     function draw() {
       const ruleMap = {};
@@ -1084,49 +1241,200 @@ const Sims = (() => {
     quick: ['Quicksort', 'O(n log n) on average', 'Splits around a pivot (median of three): smaller left, larger right, then recurses.'],
     heap: ['Heap sort', 'O(n log n)', 'Builds a max-heap, then repeatedly moves the largest value to the end.'],
   };
+  // Runs inside the sorting worker; `pieces` is the kit rewritten for values split into 1 GB typed arrays.
+  function sortWorkerMain(flat, pieces, SPLIT) {
+    let job = null, go = false, scheduled = false, kit = flat, c = flat.c;
+    const schedule = () => { if (!scheduled) { scheduled = true; setTimeout(() => { scheduled = false; tick(); }, 0); } };
+    function send(type) {
+      let snap = null;
+      if (job.a) { // a sample of the values (0…1), one per column, for drawing
+        const { a, max, cols } = job, n = kit.len(a);
+        snap = new Float32Array(cols);
+        for (let x = 0; x < cols; x++) snap[x] = kit.get(a, Math.floor((x * n) / cols)) / max;
+      }
+      self.postMessage({ type, id: job.id, prep: job.prep, cmp: c.cmp, writes: c.writes, ms: job.ms, snap }, snap ? [snap.buffer] : []);
+    }
+    function tick() {
+      if (!job || job.over) return;
+      const t0 = performance.now();
+      try {
+        while (performance.now() - t0 < 50) {
+          if (!job.a) { // building the starting order
+            const r = job.gen.next();
+            if (!r.done) { job.prep = r.value; continue; }
+            job.a = r.value.a; job.max = r.value.max; job.gen = kit.sorts[job.algo](job.a); c.cmp = 0; c.writes = 0;
+            send('ready');
+          }
+          if (!go) return; // continues on 'run'
+          c.stop = c.cmp + (1 << 20);
+          const t1 = performance.now(), r = job.gen.next();
+          job.ms += performance.now() - t1;
+          if (r.done) { job.over = true; send('done'); return; }
+        }
+      } catch (e) { // the values don't fit (allocation failed)
+        job.over = true; job.a = null;
+        self.postMessage({ type: 'nomem', id: job.id });
+        return;
+      }
+      send(job.a ? 'progress' : 'prep');
+      schedule();
+    }
+    self.onmessage = (e) => {
+      const m = e.data;
+      if (m.cmd === 'start' || m.cmd === 'estimate') {
+        self.postMessage({ type: 'predict', id: m.id, ...flat.predict(m.n, m.input, m.algo) });
+        if (m.cmd === 'estimate') return;
+        kit = m.n > SPLIT ? pieces : flat; c = kit.c;
+        job = { id: m.id, algo: m.algo, cols: m.cols, gen: kit.make(m.n, m.input), a: null, prep: 0, ms: 0, over: false };
+        schedule();
+      } else if (m.cmd === 'run') { go = true; schedule(); }
+      else if (m.cmd === 'pause') go = false;
+    };
+  }
+  let sortWorkerUrl = null;
+  function sortWorker() {
+    const src = String(Sims.fastSortKit);
+    if (!sortWorkerUrl) sortWorkerUrl = URL.createObjectURL(new Blob([`(${sortWorkerMain})((${src})(), (${Sims.segmentSource(src, 28)})(), ${2 ** 28});`], { type: 'text/javascript' }));
+    return new Worker(sortWorkerUrl);
+  }
+  // free physical memory in bytes, when the desktop app can tell (null in a plain browser)
+  const freeMemory = () => { try { const m = window.fractalsimDesktop && window.fractalsimDesktop.memory && window.fractalsimDesktop.memory(); return m ? m.free : null; } catch { return null; } };
+  const bigNum = (v) => (v < 1e15 ? Math.round(v).toLocaleString() : v.toExponential(2).replace('e+', ' × 10^'));
+  const GB = (b) => (b >= 1e9 ? `${+(b / 1e9).toPrecision(3)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`);
+  function duration(ms) {
+    const s = ms / 1000;
+    if (s < 60) return `${+s.toPrecision(2)} s`;
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${+(s / 3600).toPrecision(2)} h`;
+    if (s < 3.156e7) return `${Math.round(s / 86400)} ${I18n.t('days')}`;
+    const y = s / 3.156e7;
+    return `${bigNum(y)} ${I18n.t('years')}${y > 1.38e10 ? ` (${I18n.t('longer than the age of the universe')})` : ''}`;
+  }
+
   function sortTab() {
-    const S = st.sort;
-    let a, gen, cmp, writes, hl, doneSet, finished;
+    const S = st.sort, ANIM_MAX = 100000, kit = Sims.fastSortKit();
+    let a, max, gen, cmp, writes, hl, done, finished;
+    // big mode: the sort runs at full speed in a worker; job holds what it last reported
+    let worker = null, job = null, jobId = 0;
     const cv = el('canvas', { class: 'sim-canvas wide' }), statsEl = el('div', { class: 'pl-stats' }), info = el('p', { class: 'hint' });
+    const stopWorker = () => { if (worker) worker.terminate(); worker = null; };
     function reset() {
-      const n = S.n;
-      a = Array.from({ length: n }, (_, i) => i + 1);
-      if (S.input === 'random' || S.input === 'few') for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-      if (S.input === 'few') a = a.map((v) => Math.ceil((v / n) * 5) * Math.ceil(n / 5));
-      if (S.input === 'reversed') a.reverse();
-      if (S.input === 'nearly') for (let k = 0; k < Math.max(1, n / 20); k++) { const i = Math.floor(Math.random() * (n - 1)); [a[i], a[i + 1]] = [a[i + 1], a[i]]; }
-      gen = Sims.SORTS[S.algo](a); cmp = 0; writes = 0; hl = null; doneSet = new Set(); finished = false;
+      stopWorker();
+      const n = Math.max(1, Math.round(S.n));
+      cmp = 0; writes = 0; hl = null; finished = false; job = null;
       const [name, big, text] = SORT_INFO[S.algo];
       info.textContent = `${name} — ${big}. ${text}`;
+      if (S.animate && n <= ANIM_MAX) {
+        const g = kit.make(n, S.input);
+        let r;
+        while (!(r = g.next()).done);
+        ({ a, max } = r.value);
+        done = new Uint8Array(n);
+        gen = Sims.SORTS[S.algo](a);
+      } else startBig(n);
+      draw();
+    }
+    function startBig(n) {
+      const bytes = (n < 2 ** 32 - 8 ? 4 : 8) * n * (S.algo === 'merge' ? 2 : 1), free = freeMemory();
+      job = { id: ++jobId, n, bytes, free, phase: 'prep', prep: 0, cmp: 0, writes: 0, ms: 0, snap: null, pred: null };
+      try { worker = sortWorker(); } catch (e) { job.phase = 'error'; return; }
+      worker.onmessage = onWorker;
+      const fits = free == null || bytes <= free * 0.8;
+      if (!fits) job.phase = 'estimate';
+      worker.postMessage({ cmd: fits ? 'start' : 'estimate', id: job.id, n, input: S.input, algo: S.algo, cols: 2048 });
+      if (fits && running) worker.postMessage({ cmd: 'run' });
+    }
+    function onWorker(e) {
+      const m = e.data;
+      if (!job || m.id !== job.id) return;
+      if (m.type === 'predict') job.pred = m;
+      else if (m.type === 'nomem') { job.phase = 'estimate'; job.nomem = true; stopWorker(); pause(); }
+      else {
+        Object.assign(job, { prep: m.prep, cmp: m.cmp, writes: m.writes, ms: m.ms });
+        if (m.snap) job.snap = m.snap;
+        if (m.type === 'prep') job.phase = 'prep';
+        else if (m.type === 'ready') job.phase = 'ready';
+        else if (m.type === 'progress') job.phase = 'sorting';
+        else if (m.type === 'done') {
+          job.phase = 'done'; finished = true; stopWorker(); pause();
+          try { window.fractalsimDesktop && window.fractalsimDesktop.taskDone(); } catch { /* browser */ }
+        }
+      }
+      if (job.phase === 'estimate' && running) pause();
       draw();
     }
     function step() {
-      if (finished) return;
+      if (job || finished) return;
       for (let k = 0; k < S.speed; k++) {
         const r = gen.next();
-        if (r.done) { finished = true; hl = null; for (let i = 0; i < a.length; i++) doneSet.add(i); pause(); break; }
+        if (r.done) { finished = true; hl = null; done.fill(1); pause(); break; }
         const ev = r.value;
         hl = ev;
         if (ev.cmp) cmp++;
         if (ev.swap) writes += 2;
         if (ev.set != null) writes++;
-        if (ev.done != null) doneSet.add(ev.done);
+        if (ev.done != null) done[ev.done] = 1;
       }
     }
+    const color = (v, isDone) => (isDone ? '#51cf66' : `hsl(${220 + v * 60}, 70%, ${Theme.light ? 55 : 62}%)`);
+    function drawBig() {
+      const { ctx, w, h } = Charts.setup(cv), J = job, P = J.pred;
+      if (J.snap) {
+        const s = J.snap, cols = Math.ceil(w);
+        for (let x = 0; x < cols; x++) {
+          const v = s[Math.floor((x * s.length) / cols)];
+          ctx.fillStyle = color(v, J.phase === 'done');
+          ctx.fillRect(x, h - v * (h - 10), 1, v * (h - 10));
+        }
+      }
+      const prog = J.phase === 'prep' ? J.prep : J.phase === 'done' ? 1 : P && J.cmp ? Math.min(0.999, J.cmp / P.cmp) : 0;
+      if (J.phase !== 'estimate' && J.phase !== 'done') { ctx.fillStyle = '#ff922b'; ctx.fillRect(0, 0, w * prog, 4); }
+      const msg = J.phase === 'error' ? I18n.t('Could not start the background sort.')
+        : J.phase === 'prep' ? `${I18n.t('Preparing the values…')} ${Math.round(prog * 100)}%`
+        : J.phase === 'estimate' ? I18n.t('Too many values to hold in memory — showing the predicted cost instead.') : '';
+      if (msg) {
+        ctx.fillStyle = Theme.light ? '#333' : '#ddd'; ctx.font = '15px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(msg, w / 2, h / 2);
+      }
+      const rate = J.ms > 0 ? J.cmp / J.ms : P ? P.cmp / Math.max(P.ms, 1e-3) : 0;
+      const n = J.n, rows = [stat(I18n.t('values'), bigNum(n))];
+      if (J.phase === 'estimate') {
+        rows.push(stat(I18n.t('memory needed'), GB(J.bytes)));
+        if (J.free != null) rows.push(stat(I18n.t('memory free'), GB(J.free)));
+        if (P) rows.push(stat(I18n.t('expected comparisons'), '≈ ' + bigNum(P.cmp)), stat(I18n.t('expected writes'), '≈ ' + bigNum(P.writes)), stat(I18n.t('expected time'), '≈ ' + duration(P.ms)));
+      } else {
+        rows.push(stat(I18n.t('comparisons'), bigNum(J.cmp)), stat(I18n.t('writes'), bigNum(J.writes)));
+        if (P) rows.push(stat(I18n.t('expected comparisons'), '≈ ' + bigNum(P.cmp)));
+        if (J.ms) rows.push(stat(I18n.t('time'), duration(J.ms)));
+        if (J.phase === 'sorting' && P && rate) rows.push(stat(I18n.t('time left'), '≈ ' + duration(Math.max(0, P.cmp - J.cmp) / rate)));
+        else if (J.phase !== 'done' && P) rows.push(stat(I18n.t('expected time'), '≈ ' + duration(P.ms)));
+        rows.push(stat(I18n.t('memory'), GB(J.bytes)));
+      }
+      rows.push(stat('n²/2', bigNum((n * n) / 2)), stat('n·log₂n', bigNum(n * Math.log2(n))),
+        stat(I18n.t('status'), I18n.t({ prep: 'preparing…', ready: 'ready', sorting: 'sorting…', done: 'sorted ✓', estimate: 'estimate only', error: 'error' }[J.phase])));
+      statsEl.replaceChildren(...rows);
+    }
     function draw() {
+      if (job) return drawBig();
       const { ctx, w, h } = Charts.setup(cv);
-      const n = a.length, bw = w / n, max = Math.max(...a);
+      const n = a.length, bw = w / n;
       const mark = new Map();
       if (hl && hl.cmp) hl.cmp.forEach((i) => mark.set(i, '#fcc419'));
       if (hl && hl.swap) hl.swap.forEach((i) => mark.set(i, '#ff6b6b'));
       if (hl && hl.set != null) mark.set(hl.set, '#ff6b6b');
-      for (let i = 0; i < n; i++) {
+      const bar = (i, x, width) => {
         const bh = (a[i] / max) * (h - 10);
-        ctx.fillStyle = mark.get(i) || (doneSet.has(i) ? '#51cf66' : `hsl(${220 + (a[i] / max) * 60}, 70%, ${Theme.light ? 55 : 62}%)`);
-        ctx.fillRect(i * bw + (bw > 4 ? 1 : 0), h - bh, Math.max(1, bw - (bw > 4 ? 2 : 0)), bh);
+        ctx.fillStyle = mark.get(i) || color(a[i] / max, done[i]);
+        ctx.fillRect(x, h - bh, width, bh);
+      };
+      if (n <= w) for (let i = 0; i < n; i++) bar(i, i * bw + (bw > 4 ? 1 : 0), Math.max(1, bw - (bw > 4 ? 2 : 0)));
+      else { // more values than pixels: one sampled value per pixel column, then the highlighted ones on top
+        const cols = Math.ceil(w);
+        for (let x = 0; x < cols; x++) bar(Math.floor((x * n) / cols), x, 1);
+        for (const i of mark.keys()) bar(i, Math.floor((i * cols) / n), 1);
       }
-      statsEl.replaceChildren(stat(I18n.t('values'), String(n)), stat(I18n.t('comparisons'), String(cmp)), stat(I18n.t('writes'), String(writes)),
-        stat('n²/2', String(Math.round((n * n) / 2))), stat('n·log₂n', String(Math.round(n * Math.log2(n)))), stat(I18n.t('status'), I18n.t(finished ? 'sorted ✓' : cmp ? 'sorting…' : 'ready')));
+      statsEl.replaceChildren(stat(I18n.t('values'), bigNum(n)), stat(I18n.t('comparisons'), bigNum(cmp)), stat(I18n.t('writes'), bigNum(writes)),
+        stat('n²/2', bigNum((n * n) / 2)), stat('n·log₂n', bigNum(n * Math.log2(n))), stat(I18n.t('status'), I18n.t(finished ? 'sorted ✓' : cmp ? 'sorting…' : 'ready')));
     }
     const algo = el('select', {}, Object.entries(SORT_INFO).map(([k, [name]]) => el('option', { value: k }, name)));
     algo.value = S.algo; algo.addEventListener('change', () => { S.algo = algo.value; reset(); });
@@ -1135,10 +1443,14 @@ const Sims = (() => {
     const sliders = [slider('Number of values', 8, 400, () => S.n, (v) => { S.n = Math.round(v); reset(); }, { step: 1 }), slider('Operations per frame', 1, 200, () => S.speed, (v) => { S.speed = Math.round(v); }, { log: true, step: 1 })];
     reset();
     return {
-      controls: [algo, input, U.el('button', { type: 'button', class: 'small', onclick: () => { reset(); setRunning(true); } }, 'Shuffle & run')],
+      controls: [algo, input, check('Animate every step', () => S.animate, (v) => { S.animate = v; reset(); }),
+        U.el('button', { type: 'button', class: 'small', onclick: () => { reset(); setRunning(true); } }, 'Shuffle & run')],
       view: el('div', {}, cv, el('div', { class: 'grid2' }, sliders.map((x) => x.el)), statsEl, info,
-        el('p', { class: 'hint' }, 'Yellow: comparing. Red: writing. Green: in its final place. Try the same input with different algorithms and compare the counters.')),
-      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((x) => x.sync()),
+        el('p', { class: 'hint' }, 'Yellow: comparing. Red: writing. Green: in its final place. Try the same input with different algorithms and compare the counters.'),
+        el('p', { class: 'hint' }, 'Above 100,000 values, or with “Animate every step” off, the sort runs at full speed in the background: the bars show a sample of the values and the orange line the progress. If the values don’t fit in memory, you get the predicted comparisons and time instead, measured on this computer.')),
+      step, draw, reset, stepsPerFrame: true, finished: () => finished, onShow: () => sliders.forEach((x) => x.sync()),
+      onRun: () => { if (job) { if (worker) worker.postMessage({ cmd: 'run' }); else pause(); } },
+      onPause: () => { if (worker) worker.postMessage({ cmd: 'pause' }); },
     };
   }
 
@@ -1238,7 +1550,7 @@ const Sims = (() => {
       controls: [algo, brushSel, grids],
       view: el('div', {}, cv, el('div', { class: 'grid2' }, speed.el, el('div')), statsEl, info,
         el('p', { class: 'hint' }, 'Press Run to search from S to G. Draw walls or mud with the mouse and drag S and G to move them. Grey cells are walls, brown cells mud. Blue to purple shades show explored cells (purple = further), green the frontier, orange the path found.')),
-      step, draw, reset: clearSearch, stepsPerFrame: true, onRun: () => { if (finished) clearSearch(); }, onShow: () => speed.sync(),
+      step, draw, reset: clearSearch, stepsPerFrame: true, finished: () => finished, onRun: () => { if (finished) clearSearch(); }, onShow: () => speed.sync(),
     };
   }
 
@@ -1487,7 +1799,7 @@ const Sims = (() => {
       controls: [seed],
       view: el('div', {}, cv, el('div', { class: 'grid2' }, speed.el, el('div')), statsEl,
         el('p', { class: 'hint' }, 'Particles wander about at random until they touch the cluster and stick. Tips stick out further and catch more particles, so branches grow and inner gaps stay empty: the result looks like frost, lightning or coral, with fractal dimension about 1.71. Colour shows when each particle arrived.')),
-      step, draw, reset, stepsPerFrame: true, onShow: () => speed.sync(),
+      step, draw, reset, stepsPerFrame: true, finished: () => done, onShow: () => speed.sync(),
     };
   }
 
@@ -2072,7 +2384,7 @@ const Sims = (() => {
       controls: [algo, layout, U.el('button', { type: 'button', class: 'small', onclick: reset }, 'New points')],
       view: el('div', {}, cv, el('div', { class: 'grid2' }, sliders.map((s) => s.el)), statsEl, info,
         el('p', { class: 'hint' }, 'The convex hull is the shape a rubber band takes when stretched around all the points. Green: the best candidate so far. Red dashed: the point being checked. Orange: the hull being built. Click to add points; press Run to watch, or Step to go one comparison at a time.')),
-      step, draw, reset, stepsPerFrame: true, onShow: () => sliders.forEach((s) => s.sync()),
+      step, draw, reset, stepsPerFrame: true, finished: () => done, onShow: () => sliders.forEach((s) => s.sync()),
     };
   }
 
@@ -2093,7 +2405,7 @@ const Sims = (() => {
     sir: ['Epidemic', sirTab, 'Models'], prey: ['Predator & prey', preyTab, 'Models'], logi: ['Logistic map', logisticTab, 'Models'],
     sort: ['Sorting', sortTab, 'Algorithms'], path: ['Shortest paths', pathTab, 'Algorithms'], tsp: ['Travelling salesman', tspTab, 'Algorithms'], hull: ['Convex hull', hullTab, 'Algorithms'] };
   const built = {};
-  let playBtn, ctlBox, speedEl;
+  let playBtn, clipBtn, ctlBox, speedEl, explain;
   function show(k) {
     st.tab = k;
     root.querySelectorAll('.page-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === k));
@@ -2101,40 +2413,73 @@ const Sims = (() => {
     active = built[k];
     ctlBox.replaceChildren(...active.controls);
     body.replaceChildren(active.view);
-    playBtn.hidden = !!active.still;
+    explain.show(k);
+    playBtn.hidden = clipBtn.hidden = !!active.still;
     speedEl.hidden = !!active.still || !!active.stepsPerFrame;
     if (running && active.still) setRunning(false);
     if (active.onShow) active.onShow();
     requestAnimationFrame(() => active.draw());
+  }
+  // one frame of time: either the simulation's own step(dt), or whole steps at "steps per second"
+  function advance(sim, dt) {
+    if (sim.stepsPerFrame) sim.step(dt);
+    else {
+      sim.acc = (sim.acc || 0) + st.speed * dt;
+      let k = Math.floor(sim.acc);
+      sim.acc -= k;
+      while (k-- > 0) sim.step();
+    }
   }
   function loop(ts) {
     if (!running) return;
     const dt = Math.min(0.1, (ts - (last || ts)) / 1000);
     last = ts;
     if (Shell.isActive('simulations') && active && !active.still) {
-      if (active.stepsPerFrame) active.step(dt);
-      else {
-        active.acc = (active.acc || 0) + st.speed * dt;
-        let k = Math.floor(active.acc);
-        active.acc -= k;
-        k = Math.min(k, 50);
-        while (k-- > 0) active.step();
-      }
+      advance(active, dt);
       active.draw();
     }
     requestAnimationFrame(loop);
+  }
+  // Records the running simulation as an MP4, frame by frame (each frame is 1/fps of simulated time).
+  async function clip() {
+    const sim = active, label = TABS[st.tab][0];
+    if (!sim || sim.still) return;
+    const o = await Clips.dialog({ title: label, intro: 'Records the simulation running, exactly as it looks here — counters included. Set it up first (pattern, sliders, speed).', finish: !!sim.finished });
+    if (!o) return;
+    const wasRunning = running;
+    if (running) setRunning(false);
+    if (o.fromStart) sim.reset();
+    if (sim.onRun) sim.onRun();
+    let doneAt = -1;
+    await Clips.record({
+      name: label, secs: o.secs, fps: o.fps, size: o.size,
+      frame: (i) => {
+        if (i > 0) {
+          if (o.untilDone && sim.finished()) {
+            if (doneAt < 0) doneAt = i;
+            else if (i - doneAt > o.fps * 1.5) return null; // hold the result for a moment, then stop
+          }
+          advance(sim, 1 / o.fps);
+        }
+        sim.draw();
+        return Clips.snapshot(sim.view);
+      },
+      onEnd: () => { sim.draw(); if (wasRunning) setRunning(true); },
+    });
   }
   function setRunning(on) {
     running = on;
     playBtn.textContent = on ? '⏸ Pause' : '▶ Run';
     playBtn.classList.toggle('primary', !on);
-    if (on) { if (active && active.onRun) active.onRun(); last = 0; requestAnimationFrame(loop); }
+    if (on) { if (active && active.onRun) active.onRun(); last = 0; requestAnimationFrame(loop); } else if (active && active.onPause) active.onPause();
   }
   function init(r) {
     root = r;
     body = el('div');
     ctlBox = el('div', { class: 'btn-row pl-ctl' });
     playBtn = U.el('button', { type: 'button', class: 'primary', onclick: () => setRunning(!running) }, '▶ Run');
+    clipBtn = U.el('button', { type: 'button', title: 'Record this simulation as a video clip (MP4)', onclick: clip }, '🎬 Clip');
+    explain = Explain.attach('sim');
     speedEl = el('div', { class: 'pl-speed' }, C.slider({ label: 'Steps per second', min: 1, max: 120, log: true, get: () => st.speed, set: (v) => { st.speed = v; } }).el);
     const groups = [...new Set(Object.values(TABS).map((t) => t[2]))];
     const tabs = el('div', { class: 'sim-groups' }, groups.map((g) => el('div', { class: 'sim-group' }, el('span', { class: 'sim-group-label' }, g),
@@ -2145,7 +2490,8 @@ const Sims = (() => {
       el('div', { class: 'pane' },
         el('div', { class: 'pl-top' }, playBtn,
           U.el('button', { type: 'button', onclick: () => { if (active && !active.still) { active.step(); active.draw(); } } }, 'Step'),
-          U.el('button', { type: 'button', onclick: () => active && active.reset() }, 'Reset'), ctlBox, speedEl),
+          U.el('button', { type: 'button', onclick: () => active && active.reset() }, 'Reset'), clipBtn, explain.button, ctlBox, speedEl),
+        explain.box,
         body)));
     show(TABS[st.tab] ? st.tab : 'life');
     new ResizeObserver(() => active && active.draw()).observe(body);
@@ -2154,7 +2500,7 @@ const Sims = (() => {
 
   Shell.register('simulations', {
     label: 'Simulations', order: 11, root: () => document.getElementById('mod-simulations'), init,
-    onHide: () => { if (running) setRunning(false); },
+    onHide: () => { if (running) setRunning(false); Clips.cancel(); },
     desc: '23 simulations: cellular automata, flocks, sandpiles and crystal growth; pendulums, orbits, waves and gases; epidemics and predators; sorting, paths, salesmen and hulls.',
     features: ['Flocking & Life', 'Waves & gravity', 'Epidemic & chaos', 'Algorithms'],
     commands: Object.entries(TABS).map(([k, [label, , g]]) => ({ label: `Simulation: ${label}`, keywords: `${g} ${k} ${SIM_KEYWORDS[k] || ''}`, run: () => { if (root) show(k); else st.tab = k; } })),

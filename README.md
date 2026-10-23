@@ -11,8 +11,9 @@ A workbench for mathematics. Sections (switch with the rail on the left; Ctrl+1 
 - **Graphing** — `y = f(x)`, `x = f(y)`, polar, parametric, implicit equations, inequalities and points; sliders,
   tracing, roots / extrema / intersections, value tables; **slope fields**; **areas**; **data tables with fitted
   curves** (linear … power, with R²); Fourier series examples; PNG / SVG export, **print / PDF with notes**;
-  share links; undo/redo.
-- **3D graphs** — surfaces `z = f(x, y)` and parametric surfaces, colour by height, contour lines, rotate and zoom.
+  share links; undo/redo; **🎬 animated clips** that move a slider and save the graph as an MP4 video.
+- **3D graphs** — surfaces `z = f(x, y)` and parametric surfaces, colour by height, contour lines, rotate and zoom;
+  **🎬 turntable clips** (MP4).
 - **Geometry** — constructions with points, lines, circles, perpendiculars, bisectors, intersections, angles and
   polygons; **reflect, rotate, translate, enlarge**; **loci and traces**; drag and everything follows; send the
   construction to Graphing as equations.
@@ -31,8 +32,16 @@ A workbench for mathematics. Sections (switch with the rail on the left; Ctrl+1 
   birds, Langton's ant, sandpile avalanches, crystal growth by diffusion**), physics (pendulums, projectile, Kepler
   orbits, **n-body gravity with the figure-eight and Lagrange points, a ripple tank with double-slit interference, an
   ideal gas with Maxwell–Boltzmann speeds and Brownian motion**, Fourier epicycles), models (**SIR epidemic,
-  predator & prey, the logistic map with cobweb and bifurcation diagram**) and algorithms (sorting, path finding,
-  **travelling salesman with 2-opt / simulated annealing, convex hull**).
+  predator & prey, the logistic map with cobweb and bifurcation diagram**) and algorithms (sorting — **animated step by step, or billions of values at full speed in the background, with a measured
+  cost estimate when they don’t fit in memory** —, path finding,
+  **travelling salesman with 2-opt / simulated annealing, convex hull**). **ⓘ Explain** opens a panel for each one
+  (what you see, how it works, what to look for, things to try, where it shows up). **🎬 Clip** records any simulation
+  or probability experiment as an MP4 video, counters included — a sorting run, Game of Life, a Galton board, … —
+  rendered frame by frame like the fractal zoom videos, so it plays at the right speed; sorting, path finding, crystal
+  growth and convex hulls can end the clip by themselves when they finish.
+- **π viewer** — up to 100 000 digits of π, computed in the app, shown as digits, **base-26 letters**, pixels, RGB
+  pixels, the **π walk**, a **circle of chords** and digit frequencies; **find your birthday or a word in π**; Run streams
+  the digits in, 🎬 Clip records it, ⓘ Explain tells you what you are looking at.
 - **Fractals** — escape-time fractals with unlimited deep zoom, complex functions (domain colouring), strange
   attractors and bifurcation diagrams, IFS flames, vector fractals, ray-marched 3D fractals, zoom videos.
 

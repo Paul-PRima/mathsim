@@ -1,6 +1,6 @@
-// Geometry, probability, practice generator and simulations.
+// Geometry, probability, practice generator, simulations and the π digits.
 module.exports = (t) => {
-  const { Geo, ProbLab, Practice, Sims } = t.ctx;
+  const { Geo, ProbLab, Practice, Sims, PiMath } = t.ctx;
 
   // ---- geometry
   const objs = [
@@ -49,6 +49,11 @@ module.exports = (t) => {
   t.eq('blinker has period 2', [...g2], [...blinker]);
   t.eq('rule 90 from one cell', [...Sims.rowStep(Uint8Array.from([0, 0, 1, 0, 0]), 90)], [0, 1, 0, 1, 0]);
   t.eq('Koch L-system length', Sims.expand('F', { F: 'F+F--F+F' }, 3).s.split('F').length - 1, 64);
+  const piD = PiMath.piDigits(1000);
+  t.eq('π digits', piD.slice(0, 31), '3141592653589793238462643383279');
+  t.eq('Feynman point (six 9s) at decimal 762', piD.indexOf('999999'), 762);
+  t.eq('π in base 26', PiMath.piLetters(piD).slice(0, 16), 'DRSQLOLYRTRODNLH');
+  t.eq('π letters: only certain ones kept', PiMath.piLetters(piD).length, Math.floor(1000 * Math.LN10 / Math.log(26)) - 1);
   t.eq('sieve', [...Sims.sieve(20)].map((v, i) => (v ? i : 0)).filter(Boolean), [2, 3, 5, 7, 11, 13, 17, 19]);
   const seen = new Set();
   let adjacent = true;
@@ -120,6 +125,51 @@ module.exports = (t) => {
     const c = [3, 1, 2, 3, 1, 1, 2];
     for (const _ of gen(c)) { /* run */ }
     t.eq(`${name} sort with duplicates`, c.join(), '1,1,1,2,2,3,3');
+  }
+  {
+    // full-speed sorts: sorted, and the same comparison count as the animated version on the same input
+    const kit = Sims.fastSortKit();
+    for (const name of Object.keys(Sims.SORTS)) {
+      for (const input of ['random', 'nearly', 'reversed', 'few']) {
+        const g = kit.make(300, input);
+        let r;
+        while (!(r = g.next()).done);
+        const a = r.value.a, b = Array.from(a);
+        kit.c.cmp = 0; kit.c.stop = 1000; // pauses every 1000 comparisons, like in the worker
+        for (const _ of kit.sorts[name](a)) kit.c.stop = kit.c.cmp + 1000;
+        let ok = true;
+        for (let i = 1; i < a.length; i++) if (a[i - 1] > a[i]) ok = false;
+        t.ok(`fast ${name} sort sorts (${input})`, ok);
+        let cmp = 0;
+        for (const ev of Sims.SORTS[name](b)) if (ev.cmp) cmp++;
+        t.eq(`fast ${name} sort counts like the animated one (${input})`, kit.c.cmp, cmp);
+      }
+    }
+    // the same kit on values split into pieces of 16: same counts, and sorted across the piece boundaries
+    const seg = new Function(`return (${Sims.segmentSource(String(Sims.fastSortKit), 4)})();`)();
+    for (const name of Object.keys(Sims.SORTS)) {
+      for (const input of ['random', 'few']) {
+        const g = seg.make(301, input);
+        let r;
+        while (!(r = g.next()).done);
+        const a = r.value.a, flat = Float64Array.from({ length: 301 }, (_, i) => seg.get(a, i));
+        t.ok(`split ${name}: 19 pieces`, Array.isArray(a) && a.length === 19 && seg.len(a) === 301);
+        seg.c.cmp = 0;
+        for (const _ of seg.sorts[name](a));
+        kit.c.cmp = 0;
+        for (const _ of kit.sorts[name](flat));
+        let ok = true;
+        for (let i = 0; i < 301; i++) if (seg.get(a, i) !== flat[i]) ok = false;
+        t.ok(`split ${name} sort sorts (${input})`, ok);
+        t.eq(`split ${name} sort counts like the plain one (${input})`, seg.c.cmp, kit.c.cmp);
+      }
+    }
+    const big = kit.run(1e6, 'random', 'quick');
+    t.ok('fast quicksort: a million values', big.a.every((v, i) => !i || big.a[i - 1] <= v));
+    const p = kit.predict(1e7, 'random', 'merge');
+    t.ok('merge sort prediction ≈ n·log₂n', p.cmp > 0.85 * 1e7 * Math.log2(1e7) && p.cmp < 1e7 * Math.log2(1e7));
+    const q = kit.predict(1e5, 'random', 'selection');
+    t.near('selection sort prediction = n(n−1)/2', q.cmp, (1e5 * (1e5 - 1)) / 2, 1e-2);
   }
   {
     const W = 7, H = 5, grid = new Uint8Array(W * H);

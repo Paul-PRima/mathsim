@@ -1103,6 +1103,41 @@
   }
 
   // ---------------------------------------------------------------- page
+  // ---------------------------------------------------------------- clips: move a slider and record the graph
+  async function clipDialog() {
+    const vars = S.items.filter((it) => it.kind === 'var' && it.slider && !it.err);
+    if (!vars.length) return U.toast('Add a slider first (for example a = 1) — the clip moves it');
+    const pick = el('select', {}, vars.map((it, i) => el('option', { value: i }, it.varName)));
+    const from = el('input', { type: 'text', class: 'mono' }), to = el('input', { type: 'text', class: 'mono' });
+    const range = () => { const it = vars[+pick.value]; from.value = MX.fmt(it.min); to.value = MX.fmt(it.max); };
+    pick.addEventListener('change', range);
+    range();
+    const there = el('input', { type: 'checkbox' }), ease = el('input', { type: 'checkbox', checked: true });
+    const o = await Clips.dialog({
+      title: 'Animated graph', secs: 8, start: false,
+      intro: 'Moves a slider from one value to another and records the graph as it changes. Set up the view first.',
+      fields: [['Slider', pick], ['From', from], ['To', to], ['There and back', there], ['Ease in and out', ease]],
+    });
+    if (!o) return;
+    const it = vars[+pick.value], orig = it.text;
+    const num = (inp, d) => { try { const v = MX.evaluate(inp.value); return isFinite(v) ? v : d; } catch { return d; } };
+    const a = num(from, it.min), b = num(to, it.max);
+    await Clips.record({
+      name: `graph-${it.varName}`, secs: o.secs, fps: o.fps, size: o.size,
+      frame: (i, t) => {
+        let p = there.checked ? 1 - Math.abs(1 - 2 * t) : t;
+        if (ease.checked) p = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+        let v = a + (b - a) * p;
+        if (it.step >= 1) v = Math.round(v / it.step) * it.step; // whole-number sliders (sum limits, counts) stay whole
+        it.text = `${it.varName} = ${MX.fmt(+v.toPrecision(10))}`;
+        compileAll();
+        draw();
+        return cv;
+      },
+      onEnd: () => { it.text = orig; refresh(true); },
+    });
+  }
+
   function init(root) {
     load();
     listEl = el('div', { class: 'gx-list' });
@@ -1148,7 +1183,8 @@
           U.el('button', { type: 'button', title: 'Home view', onclick: () => { S.view = { ...HOME }; viewChanged(); } }, '⌂'),
           U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓'),
           U.el('button', { type: 'button', title: 'Save as SVG (vector)', class: 'gx-svg', onclick: saveSVG }, 'SVG'),
-          U.el('button', { type: 'button', title: 'Print / PDF with notes', onclick: printDialog }, '🖨')),
+          U.el('button', { type: 'button', title: 'Print / PDF with notes', onclick: printDialog }, '🖨'),
+          U.el('button', { type: 'button', title: 'Record an animated clip (moves a slider)', onclick: clipDialog }, '🎬')),
         coordEl)));
     bindCanvas();
     new ResizeObserver(() => { requestDraw(); schedulePois(); }).observe(cv);
@@ -1189,10 +1225,12 @@
       { label: 'Share this graph', keywords: 'link share teilen', run: () => shareLink() },
       { label: 'Save the graph as SVG', keywords: 'export vector svg', run: () => saveSVG() },
       { label: 'Print the graph / save as PDF', keywords: 'print pdf drucken notes', run: () => printDialog() },
+      { label: 'Record an animated graph clip', keywords: 'video clip mp4 animate slider animation film', run: () => clipDialog() },
       ...EXAMPLES.map((ex) => ({ label: `Graph example: ${ex.name}`, keywords: 'example beispiel ' + ex.name, run: () => loadExample(ex) })),
     ],
     label: 'Graphing', key: 3, order: 3, root: () => document.getElementById('mod-graph'), init,
     onShow: () => requestDraw(),
+    onHide: () => Clips.cancel(),
     desc: 'Plot functions, polar and parametric curves, equations and inequalities. Sliders, tracing, roots, extrema and intersections.',
     features: ['y = f(x)', 'Polar & parametric', 'Implicit curves', 'Sliders'],
   });

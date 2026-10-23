@@ -403,6 +403,8 @@ input[type="range"] {
 .modal-title { font-weight: 600; margin-bottom: 10px; }
 .modal input { width: 100%; margin-bottom: 12px; }
 .modal .btn-row { justify-content: flex-end; margin: 0; }
+.modal .check input { width: 15px; margin: 0; flex: none; }
+.modal .ctl > input { margin-bottom: 0; }
 
 /* ---------------- small screens: panel floats over the canvas ---------------- */
 @media (max-width: 760px) {
@@ -806,3 +808,34 @@ kbd { font: 11px ui-monospace, Consolas, monospace; padding: 2px 6px; border-rad
 .gx-notes { width: 100%; font: inherit; }
 
 .tool-card.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow 0.3s; }
+
+/* clips (js/clips.js): progress box while a clip records; the shield keeps the page still meanwhile */
+.clip-shield { position: fixed; inset: 0; z-index: 90; cursor: progress; }
+.clip-job {
+  position: fixed; right: 16px; bottom: 16px; z-index: 91;
+  width: 280px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+.clip-job .vj-title { font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-job .bar { height: 5px; background: var(--panel-3); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+.clip-job .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.3s; }
+.clip-job .vj-text { color: var(--muted); font-size: 12px; }
+.clip-job .vj-row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.clip-job .vj-where { color: var(--muted); font-size: 11px; }
+
+/* explain panels (js/explain.js): both languages are in the page, <html lang> picks one */
+.xp-btn.on { background: var(--panel-3); border-color: var(--accent); }
+.xp { position: relative; margin: 0 0 12px; padding: 12px 16px 14px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.xp[hidden] { display: none; }
+html[lang="de"] .xp .xp-en, html:not([lang="de"]) .xp .xp-de { display: none; }
+.xp h4 { margin: 10px 0 3px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.xp-en > h4:first-of-type, .xp-de > h4:first-of-type { margin-top: 0; }
+.xp-cols, .xp-real { margin-top: 6px; }
+.xp p { margin: 0; max-width: 80ch; }
+.xp ul { margin: 0; padding-left: 18px; }
+.xp li + li { margin-top: 2px; }
+.xp-eq { margin: 8px 0 2px; padding: 6px 10px; background: var(--panel); border-radius: 6px; font: 13px ui-monospace, Consolas, monospace; overflow-x: auto; }
+.xp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.xp-close { position: absolute; top: 6px; right: 6px; }
+@media (max-width: 760px) { .xp-cols { grid-template-columns: 1fr; } }

@@ -328,6 +328,33 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
     out.toBlob((b) => b && U.download(b, 'surface.png'), 'image/png');
   }
 
+  // A turntable clip: the camera turns (and optionally tilts) around the surfaces.
+  async function clipDialog() {
+    if (!gl) return;
+    const turn = el('input', { type: 'number', step: 15, value: 360 }), tilt = el('input', { type: 'number', step: 5, value: 0 });
+    const ease = el('input', { type: 'checkbox' });
+    const o = await Clips.dialog({
+      title: 'Turning 3D graph', secs: 8, start: false,
+      intro: 'Turns the camera around the surfaces and records it. One full turn without easing loops seamlessly.',
+      fields: [['Turn by (°)', turn], ['Tilt by (°)', tilt, 'Positive tilts the camera upwards'], ['Ease in and out', ease]],
+    });
+    if (!o) return;
+    const cam0 = Object.assign({}, st.cam), dYaw = +turn.value || 0, dPitch = +tilt.value || 0;
+    const frames = Math.max(2, Math.round(o.secs * o.fps));
+    await Clips.record({
+      name: '3d-graph', secs: o.secs, fps: o.fps, size: o.size,
+      frame: (i, t) => {
+        // a full turn ends one frame short of the start, so the clip loops without a repeated frame
+        let p = ease.checked ? (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2) : (i / frames);
+        if (!isFinite(p)) p = 0;
+        st.cam = Object.assign({}, cam0, { yaw: cam0.yaw - dYaw * p, pitch: U.clamp(cam0.pitch + dPitch * p, -89, 89) });
+        draw(); // the WebGL picture is only readable right after drawing, so take it now
+        return Clips.snapshot(cv.parentElement);
+      },
+      onEnd: () => { st.cam = cam0; requestDraw(); },
+    });
+  }
+
   function init(root) {
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.items)) Object.assign(st, s); } catch { /* fresh */ }
     cv = el('canvas', { class: 'sf-canvas' });
@@ -369,7 +396,8 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
           U.el('button', { type: 'button', title: 'Zoom in', onclick: () => { st.cam.dist = Math.max(1.2, st.cam.dist * 0.85); save(); requestDraw(); } }, '+'),
           U.el('button', { type: 'button', title: 'Zoom out', onclick: () => { st.cam.dist = Math.min(20, st.cam.dist / 0.85); save(); requestDraw(); } }, '−'),
           U.el('button', { type: 'button', title: 'Reset view', onclick: () => { st.cam = { yaw: 35, pitch: 28, dist: 3.6 }; save(); requestDraw(); } }, '⌂'),
-          U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓')),
+          U.el('button', { type: 'button', title: 'Save as PNG', onclick: savePNG }, '⤓'),
+          U.el('button', { type: 'button', title: 'Record a turning clip (MP4)', onclick: clipDialog }, '🎬')),
         infoEl)));
     // orbit with the mouse
     let drag = null;
@@ -392,6 +420,7 @@ precision highp float; uniform vec4 uColor; out vec4 o; void main() { o = uColor
   Shell.register('surface', {
     label: '3D graphs', short: '3D', key: 4, order: 4, root: () => document.getElementById('mod-surface'), init,
     onShow: () => requestDraw(),
+    onHide: () => Clips.cancel(),
     desc: 'Plot surfaces z = f(x, y) and parametric surfaces in 3D. Rotate, zoom, colour by height and contour lines.',
     features: ['z = f(x, y)', 'Parametric surfaces', 'Contours', 'Rotate & zoom'],
     commands: EXAMPLES.map(([name], i) => ({ label: `3D: ${name}`, keywords: 'surface 3d example', run: () => { const s = document.querySelector('#mod-surface select'); if (s) { s.value = i; s.dispatchEvent(new Event('change')); } } })),

@@ -277,6 +277,7 @@ I18n.add('de', {
   'Random order': 'Zufällige Reihenfolge', 'Nearly sorted': 'Fast sortiert', Reversed: 'Umgekehrt', 'Few distinct values': 'Wenige verschiedene Werte', 'Shuffle & run': 'Mischen & starten', 'Number of values': 'Anzahl der Werte',
   'Operations per frame': 'Operationen pro Bild', values: 'Werte', comparisons: 'Vergleiche', writes: 'Schreibvorgänge', status: 'Status', 'sorted ✓': 'sortiert ✓', 'sorting…': 'sortiert…', ready: 'bereit',
   'Yellow: comparing. Red: writing. Green: in its final place. Try the same input with different algorithms and compare the counters.': 'Gelb: vergleichen. Rot: schreiben. Grün: am endgültigen Platz. Probiere dieselbe Eingabe mit verschiedenen Algorithmen und vergleiche die Zähler.',
+  'Animate every step': 'Jeden Schritt animieren', years: 'Jahre', 'longer than the age of the universe': 'länger als das Alter des Universums', 'Could not start the background sort.': 'Die Sortierung im Hintergrund konnte nicht starten.',  'Preparing the values…': 'Werte werden vorbereitet…', 'Too many values to hold in memory — showing the predicted cost instead.': 'Zu viele Werte für den Arbeitsspeicher — stattdessen der vorhergesagte Aufwand.',  'memory needed': 'benötigter Speicher', 'memory free': 'freier Speicher', memory: 'Speicher', 'expected comparisons': 'erwartete Vergleiche', 'expected writes': 'erwartete Schreibvorgänge', 'expected time': 'erwartete Zeit', 'time left': 'verbleibende Zeit',  'preparing…': 'wird vorbereitet…', 'estimate only': 'nur Schätzung',  'Above 100,000 values, or with “Animate every step” off, the sort runs at full speed in the background: the bars show a sample of the values and the orange line the progress. If the values don’t fit in memory, you get the predicted comparisons and time instead, measured on this computer.': 'Über 100.000 Werten oder ohne „Jeden Schritt animieren“ sortiert der Algorithmus mit voller Geschwindigkeit im Hintergrund: Die Balken zeigen eine Stichprobe der Werte, die orange Linie den Fortschritt. Passen die Werte nicht in den Speicher, siehst du stattdessen die vorhergesagten Vergleiche und die Zeit, gemessen auf diesem Computer.',
   'O(n log n) on average': 'O(n log n) im Mittel',
   'Swaps neighbours that are in the wrong order; the largest values bubble to the end.': 'Vertauscht Nachbarn in falscher Reihenfolge; die größten Werte steigen ans Ende auf.',
   'Takes each value and slides it left into place — very fast on nearly sorted data.': 'Nimmt jeden Wert und schiebt ihn nach links an seinen Platz — sehr schnell bei fast sortierten Daten.',
@@ -486,4 +487,45 @@ I18n.add('de', {
     const known = (x) => !/[A-Za-z]{2}/.test(x) || I18n.dict.de[x.trim()] !== undefined || I18n.t(x) !== x;
     return known(m[1]) && known(m[3]) ? `${I18n.t(m[1])}${m[2]}${I18n.t(m[3])}` : m[0];
   }],
+]);
+
+// ---------------------------------------------------------------- clips (js/clips.js) and explain panels (js/explain.js)
+I18n.add('de', {
+  '🎬 Clip': '🎬 Clip', 'ⓘ Explain': 'ⓘ Erklären', 'What is going on here, and why?': 'Was passiert hier, und warum?',
+  'Record this simulation as a video clip (MP4)': 'Diese Simulation als Videoclip aufnehmen (MP4)', 'Record this experiment as a video clip (MP4)': 'Dieses Experiment als Videoclip aufnehmen (MP4)',
+  'Length (seconds)': 'Länge (Sekunden)', 'Frame rate': 'Bildrate', 'As on screen': 'Wie auf dem Bildschirm', Record: 'Aufnehmen', 'Ease in and out': 'Sanft beschleunigen und abbremsen',
+  'Reset first (otherwise it carries on from what you see now)': 'Erst zurücksetzen (sonst geht es ab dem aktuellen Stand weiter)',
+  'End the clip shortly after it finishes': 'Clip kurz nach dem Ende beenden',
+  'Saved as an MP4 video (H.264, plays almost anywhere). It plays at the speed you would see, however long the frames take to make.': 'Gespeichert als MP4-Video (H.264, läuft fast überall). Es läuft im Tempo, das du siehst, egal wie lange die Bilder zum Erstellen brauchen.',
+  'Records the simulation running, exactly as it looks here — counters included. Set it up first (pattern, sliders, speed).': 'Nimmt die laufende Simulation genau so auf, wie sie hier aussieht — mit Zählern. Stell sie vorher ein (Muster, Regler, Tempo).',
+  'Records the experiment running at the speed set here, with its charts and counters.': 'Nimmt das laufende Experiment im hier eingestellten Tempo auf, mit Diagrammen und Zählern.',
+  'Animated graph': 'Animierter Graph', 'Moves a slider from one value to another and records the graph as it changes. Set up the view first.': 'Bewegt einen Schieberegler von einem Wert zum anderen und nimmt den Graphen dabei auf. Stell vorher den Ausschnitt ein.',
+  Slider: 'Schieberegler', To: 'Bis', 'There and back': 'Hin und zurück',
+  'Turning 3D graph': 'Drehender 3D-Graph', 'Turns the camera around the surfaces and records it. One full turn without easing loops seamlessly.': 'Dreht die Kamera um die Flächen und nimmt das auf. Eine volle Drehung ohne sanftes Abbremsen lässt sich nahtlos wiederholen.',
+  'Turn by (°)': 'Drehen um (°)', 'Tilt by (°)': 'Kippen um (°)', 'Positive tilts the camera upwards': 'Positive Werte kippen die Kamera nach oben',
+  'Record an animated clip (moves a slider)': 'Animierten Clip aufnehmen (bewegt einen Schieberegler)', 'Record a turning clip (MP4)': 'Drehenden Clip aufnehmen (MP4)',
+  'Record an animated graph clip': 'Clip eines animierten Graphen aufnehmen',
+  'Starting…': 'Startet…', 'Esc cancels': 'Esc bricht ab', 'Clip saved': 'Clip gespeichert', 'Clip cancelled': 'Clip abgebrochen',
+  'Clips need the desktop app, Chrome or Edge': 'Clips brauchen die Desktop-App, Chrome oder Edge', 'A clip is already recording': 'Es wird schon ein Clip aufgenommen',
+  'Add a slider first (for example a = 1) — the clip moves it': 'Füge zuerst einen Schieberegler hinzu (zum Beispiel a = 1) — der Clip bewegt ihn',
+  // π viewer
+  'π viewer': 'π-Betrachter',
+  'Up to 100 000 digits of π as digits, base-26 letters, pixels, RGB pixels, the π walk and a circle of chords. Search for your birthday or a word.':
+    'Bis zu 100 000 Stellen von π als Ziffern, Buchstaben zur Basis 26, Pixel, RGB-Pixel, π-Spaziergang und Sehnenkreis. Suche deinen Geburtstag oder ein Wort.',
+  'Digits & letters': 'Ziffern & Buchstaben', 'Find your birthday': 'Finde deinen Geburtstag', 'find my birthday': 'meinen Geburtstag finden',
+  'The digits of π, computed right here, as digits, letters, pixels, a walk and a circle. Find your birthday in π.': 'Die Stellen von π, direkt hier berechnet, als Ziffern, Buchstaben, Pixel, Spaziergang und Kreis. Finde deinen Geburtstag in π.',
+  'Records the digits streaming into the current view, counters included. Pick the view and the speed first.': 'Nimmt auf, wie die Ziffern in die aktuelle Ansicht einlaufen, mit Zählern. Wähle vorher Ansicht und Tempo.',
+  'Record the digits streaming in as a video clip (MP4)': 'Das Einlaufen der Ziffern als Videoclip aufnehmen (MP4)', Digits: 'Ziffern', 'Letters (base 26)': 'Buchstaben (Basis 26)', Pixels: 'Pixel', 'RGB pixels': 'RGB-Pixel', 'π walk': 'π-Spaziergang', 'Circle of chords': 'Sehnenkreis', 'Digit frequencies': 'Häufigkeit der Ziffern',
+  '1 000 decimals': '1 000 Nachkommastellen', '10 000 decimals': '10 000 Nachkommastellen', '100 000 decimals': '100 000 Nachkommastellen',
+  'e.g. 1403 or PI': 'z. B. 1403 oder PI', Find: 'Suchen', 'Digits per second': 'Ziffern pro Sekunde',
+  'Type digits (a birthday, a phone number …) or a word and press Find. Words are looked up in π written in base 26.': 'Gib Ziffern (einen Geburtstag, eine Telefonnummer …) oder ein Wort ein und drücke „Suchen“. Wörter werden in π zur Basis 26 gesucht.',
+  'is not in the first': 'kommt nicht vor in den ersten', 'base-26 letters of π — try more digits.': 'Buchstaben von π zur Basis 26 — nimm mehr Stellen.',
+  'decimals of π — try more digits.': 'Nachkommastellen von π — nimm mehr Stellen.', 'appears at base-26 letter': 'steht bei Buchstabe (Basis 26)',
+  'appears at decimal place': 'steht ab Nachkommastelle', occurrence: 'Vorkommen', 'press Find again for the next one': 'noch einmal „Suchen“ für das nächste',
+  'Computing π…': 'π wird berechnet…', 'decimals shown': 'angezeigte Nachkommastellen', 'latest digit': 'letzte Ziffer', 'letters (base 26)': 'Buchstaben (Basis 26)',
+  'χ² (are the digits equally common?)': 'χ² (sind alle Ziffern gleich häufig?)', digit: 'Ziffer', 'how often': 'wie oft',
+  'π = 3.14159… never ends and never repeats. Run streams the digits in; Reset starts again from 3. In the walk each digit is a step turned by digit × 36°, in the circle every digit is joined to the next one, and each RGB pixel takes 3 digits for red, 3 for green and 3 for blue.':
+    'π = 3,14159… endet nie und wiederholt sich nie. „Start“ lässt die Ziffern einlaufen, „Zurücksetzen“ beginnt wieder bei 3. Beim Spaziergang ist jede Ziffer ein Schritt, gedreht um Ziffer × 36°; im Kreis wird jede Ziffer mit der nächsten verbunden; jedes RGB-Pixel nimmt je 3 Ziffern für Rot, Grün und Blau.',
+}, [
+  [/^Frame (\d+) \/ (\d+) · about (.+) left$/, 'Bild $1 / $2 · noch etwa $3'],
 ]);

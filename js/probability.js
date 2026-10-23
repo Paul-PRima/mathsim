@@ -558,7 +558,7 @@ const ProbLab = (() => {
   const EXPS = { dice: ['Dice', diceExp], coins: ['Coin flips', coinExp], galton: ['Galton board', galtonExp], pi: ['Monte Carlo π', piExp],
     monty: ['Monty Hall', montyExp], bday: ['Birthday paradox', birthdayExp], walk: ['Random walks', walkExp], markov: ['Markov chains', markovExp] };
   const built = {};
-  let playBtn, speedCtl, ctlBox;
+  let playBtn, speedCtl, ctlBox, explain;
   function show(k) {
     st.tab = k;
     root.querySelectorAll('.page-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === k));
@@ -566,22 +566,45 @@ const ProbLab = (() => {
     active = built[k];
     ctlBox.replaceChildren(...active.controls);
     body.replaceChildren(active.view);
+    explain.show(k);
     requestAnimationFrame(() => active.draw());
+  }
+  // one frame of time; speed = events per second
+  function advance(exp, dt) {
+    exp.acc = (exp.acc || 0) + st.speed * dt;
+    const k = Math.floor(exp.acc);
+    exp.acc -= k;
+    if (k) exp.step(k);
+    if (exp.tick) exp.tick(dt);
   }
   function loop(ts) {
     if (!running) return;
     const dt = Math.min(0.1, (ts - (last || ts)) / 1000);
     last = ts;
     if (Shell.isActive('probability') && active) {
-      // speed = events per second
-      active.acc = (active.acc || 0) + st.speed * dt;
-      const k = Math.floor(active.acc);
-      active.acc -= k;
-      if (k) active.step(k);
-      if (active.tick) active.tick(dt);
+      advance(active, dt);
       active.draw();
     }
     requestAnimationFrame(loop);
+  }
+  // Records the running experiment as an MP4, frame by frame (each frame is 1/fps of experiment time).
+  async function clip() {
+    const exp = active, label = EXPS[st.tab][0];
+    if (!exp) return;
+    const o = await Clips.dialog({ title: label, intro: 'Records the experiment running at the speed set here, with its charts and counters.' });
+    if (!o) return;
+    const wasRunning = running;
+    if (running) setRunning(false);
+    if (o.fromStart) exp.reset();
+    await Clips.record({
+      name: label, secs: o.secs, fps: o.fps, size: o.size,
+      frame: (i) => {
+        if (i > 0) advance(exp, 1 / o.fps);
+        exp.draw();
+        return Clips.snapshot(exp.view);
+      },
+      onEnd: () => { exp.draw(); if (wasRunning) setRunning(true); },
+    });
   }
   function setRunning(on) {
     running = on;
@@ -594,13 +617,17 @@ const ProbLab = (() => {
     body = el('div');
     ctlBox = el('div', { class: 'btn-row pl-ctl' });
     playBtn = U.el('button', { type: 'button', class: 'primary', onclick: () => setRunning(!running) }, '▶ Run');
+    explain = Explain.attach('prob');
     speedCtl = C.slider({ label: 'Speed (per second)', min: 1, max: 5000, log: true, step: 1, get: () => st.speed, set: (v) => { st.speed = v; } });
     const tabs = el('div', { class: 'seg page-tabs' }, Object.entries(EXPS).map(([k, [label]]) => el('button', { type: 'button', 'data-v': k, onclick: () => show(k) }, label)));
     root.append(el('div', { class: 'page' },
       el('div', { class: 'page-head' }, el('h2', {}, 'Probability lab'), el('p', {}, 'Run random experiments and watch them approach the theory.')),
       tabs,
       el('div', { class: 'pane' },
-        el('div', { class: 'pl-top' }, playBtn, U.el('button', { type: 'button', onclick: () => { active.reset(); } }, 'Reset'), ctlBox, el('div', { class: 'pl-speed' }, speedCtl.el)),
+        el('div', { class: 'pl-top' }, playBtn, U.el('button', { type: 'button', onclick: () => { active.reset(); } }, 'Reset'),
+          U.el('button', { type: 'button', title: 'Record this experiment as a video clip (MP4)', onclick: clip }, '🎬 Clip'), explain.button,
+          ctlBox, el('div', { class: 'pl-speed' }, speedCtl.el)),
+        explain.box,
         body)));
     show(EXPS[st.tab] ? st.tab : 'dice');
     new ResizeObserver(() => active && active.draw()).observe(body);
@@ -609,7 +636,7 @@ const ProbLab = (() => {
 
   Shell.register('probability', {
     label: 'Probability lab', short: 'Probability', key: 7, order: 7, root: () => document.getElementById('mod-probability'), init,
-    onHide: () => { if (running) setRunning(false); },
+    onHide: () => { if (running) setRunning(false); Clips.cancel(); },
     desc: 'Simulate dice, coins, a Galton board, Monte Carlo π, Monty Hall, the birthday paradox, random walks and Markov chains — and watch them approach the theory.',
     features: ['Dice & coins', 'Galton board', 'Monty Hall', 'Markov chains'],
     commands: Object.entries(EXPS).map(([k, [label]]) => ({ label: `Probability: ${label}`, keywords: 'experiment simulation ' + k, run: () => { if (root) show(k); else st.tab = k; } })),
